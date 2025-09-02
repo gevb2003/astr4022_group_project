@@ -17,7 +17,7 @@ from astropy.table import Table
 import warnings
 plt.ion()
 warnings.filterwarnings('ignore', 'The iteration is not making good progress')
-tsuji_K = Table.read('../data/tsuji_K.dat', format='ascii.fixed_width_no_header', \
+tsuji_K = Table.read('tsuji_K.dat', format='ascii.fixed_width_no_header', \
  names=('mol', 'c0', 'c1', 'c2','c3','c4','molcode','ediss','comment'), col_starts=(0,7,19,31,43,55,67,80,87))
 
 debroglie_const = (c.h**2/2/np.pi/c.m_e/c.k_B).cgs.value
