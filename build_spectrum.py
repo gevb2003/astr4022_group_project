@@ -25,7 +25,7 @@ g_cgs = 10**logg * u.cm/u.s**2
 
 # define tau grid
 tau_grid = np.linspace(0,5,100)
-#define grind for computing
+#define grid for computing
 prl_grid = -10 * np.ones(len(tau_grid))
 
 # grey temperature profile 
@@ -74,8 +74,8 @@ def dpdtau(tau, p_cgs):
 
 
 #Use solve_ivp (better than Euler's method) to solve for p(tau) and state variables
-#Start at a "very low" pressure.
-soln = solve_ivp(dpdtau, [0,len(tau_grid)], [1e-5])
+#Start at a "very low" pressure as an initial guess
+soln = solve_ivp(dpdtau, [0,tau_grid[-1]], [1e-5])
 p = soln.y[0]*u.dyne/u.cm**2
 tau = soln.t
 T = Teff * (3/4 * (tau + 2/3))**(1/4) 
