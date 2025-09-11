@@ -48,7 +48,7 @@ def solarmet():
     #A lot of these degeneracies are educated guesses! But we're not worried
     #about most elements in the doubly ionized state. 
     gIII = np.array([1,1,1,6,9,9,6,1,1,9,6,1,30,1])
-    return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names
+    return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names # Will want to check that our abundances are in the same form as the above
     
 def equilibrium_equation(rho, T):
     """Find the components of the chemical equilibrium equation in matrix form.
@@ -56,7 +56,6 @@ def equilibrium_equation(rho, T):
     There are two parts - linear in partial pressures and logarithmic in 
     partial pressures. 
 
-    Will take the input from the rosseland opacity table which has logT and logR (density?)
     """
     #Input constants and abundances
     abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names = solarmet()
@@ -64,8 +63,8 @@ def equilibrium_equation(rho, T):
     #Find the reference pressure, which is the ideal gas pressure corresponding to
     #atomic Hydrogen only.
     log_P_ref = np.log10( (rho*c.k_B*T/u.u).to(u.dyn/u.cm**2).value )
-    nmol = len(tsuji_K)
-    natom = len(abund)
+    nmol = len(tsuji_K) # This is our molecule input - replace with ExoMol data
+    natom = len(abund) # This is our other abundance input - replace with Caffau data
     
     #The linear matrix, with one equation (row) per atom,  one
     #for the electron.
@@ -107,7 +106,7 @@ def equilibrium_equation(rho, T):
         log_matrix[natom + i, 2*natom+1+i] = -1
         mol = tsuji_K[i]
         log_b[natom + i] = mol['c0'] + mol['c1']*th + mol['c2']*th**2 + mol['c3']*th**3 + mol['c4']*th**4
-        for j in range(int(mol['molcode'][0])):
+        for j in range(int(mol['molcode'][0])): # Will need to change these column names to match our exomol data
             atom = int(mol['molcode'][1+j*3:3+j*3])
             natom_in_mol = int(mol['molcode'][3+j*3:4+j*3])
             k = np.argwhere(n_p==atom)[0,0]
@@ -135,6 +134,8 @@ def eq_solve_func(logps, linear_matrix, linear_b, log_matrix, log_b, log_P_ref, 
     
 def equilibrium_solve(rho, T, plot=False):
     """Solve for atomic and molecular equilibrium. 
+
+    This is the function we will use to calculate the pressures for our Rosseland Opacity table.
     
     Parameters
     ----------
@@ -185,6 +186,8 @@ def equilibrium_solve(rho, T, plot=False):
     x0[-2] = x0[5]-0.5
     x0[-1] = x0[5]-0.5
     
+    # Are all the above things that we should be keeping??
+
     #Now solve for the abundances of the molecules!
     res = op.root(eq_solve_func, x0, args=(linear_matrix, linear_b, log_matrix, log_b, log_P_ref, abund),method='lm')#, )
     
@@ -267,7 +270,8 @@ def simplified_eos_rho_T(rho, T, ionised=True):
     P = ((n_h*np.sum(abund) + n_e)*c.k_B*T).cgs
     
     return P, 5/3, 5/3, 0*u.erg/u.g
-    
+
+# Do we need a new version of the below to include the Saha equation for molecules?
 def saha(n_e, T):
     """Compute the solution to the Saha equation as a function of electron number
     density and temperature, in CGS units. 
@@ -302,7 +306,7 @@ def saha(n_e, T):
     
     #This will break for very low temperatures. In this case, fix a zero  
     #ionization fraction
-    if (T<1000):
+    if (T<1000): # Can keep this as we are optimizing our output for 3000-4000K
         ns = np.zeros(n_elt*3)
         ns[3*np.arange(n_elt)] = abund
         ns = np.maximum(n_e*1e15*ns, 1e-300)

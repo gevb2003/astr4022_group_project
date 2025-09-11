@@ -6,27 +6,29 @@ from scipy.interpolate import RegularGridInterpolator
 def read_opacity_table(filename):
     """
     Reads .tron file and returns log_T array, log_R array, and the table.
-    Handles header and stuck-together numbers robustly.
+    Handles header and missing separation between numbers due to minus signs.
     """
     log_R = None
     data_rows = []
     expected_cols = None
     with open(filename, 'r') as f:
         for line in f:
-            # Flexible header row detection
+            # Skip rows with comments and find the first row (log T header detection)
             if 'log T' in line:
-                log_R = np.array([float(num) for num in re.findall(r'-?\d+\.\d+', line)])
+                log_R = np.array([float(num) for num in re.findall(r'-?\d+\.\d+', line)]) # Identify all unique values in the log R array (first row).
+                # Uses regular expression syntax to ensure cells are parsed as valid floats.
                 expected_cols = len(log_R) + 1  # log_T + opacities
-            # Data row detection: must contain at least one float and start with a float
+            
+            # Data row detection to handle missing spaces. Checks for internal consistency in table shape.
             elif re.search(r'-?\d+\.\d+', line):
-                numbers = re.findall(r'-?\d+\.\d+', line)
+                numbers = re.findall(r'-?\d+\.\d+', line) # Same parsing method as above. More crucial here as this is where the missing separation occurs.
                 if expected_cols and len(numbers) == expected_cols:
                     data_rows.append([float(num) for num in numbers])
     if not data_rows or log_R is None:
-        raise ValueError("No valid data found in file.")
+        raise ValueError("No valid data found in file.") # Raise error if format cannot be handled by this function or file is empty.
     data = np.array(data_rows)
     log_T = data[:, 0]      # First column is log(T)
-    table = data[:, 1:]     # Remaining columns are the table
+    table = data[:, 1:]     # Rosseland opacities
     return log_T, log_R, table
 
 def read_abund_table(abund_filename, opac_filename, format="fraction"):
@@ -54,44 +56,48 @@ def read_abund_table(abund_filename, opac_filename, format="fraction"):
             Dictionary containing abundance values with species names as keys.
             In linear cgs units.
     """
-    # Get X, Y, Z from the filename. File name is in the format [source].[X=0.x].[Z=0.z]
-    # E.g. Caffau11.7.02 has X = 0.7 and Z = 0.02
-    # Use OS to strip from the filename
-    parts = os.path.splitext(os.path.basename(opac_filename))[0].split('.')
+    # Get X, Y, Z from the filename. File name is in the format [source].[X=0.x].[Z=0.z] E.g. Caffau11.7.02 has X = 0.7 and Z = 0.02
+    parts = os.path.splitext(os.path.basename(opac_filename))[0].split('.') # Use OS to strip data from the filename
     X_tot = float('0.' + parts[1])
     Z_tot = float('0.' + parts[2])
     Y_tot = 1 - X_tot - Z_tot
 
+    # Define desired datatype for each column
     dtype = [('species', 'U10'), ('atomic_number', int), ('abundance', float)]
     rows = []
     with open(abund_filename, 'r', encoding='utf-16') as f:
         for line in f:
+            # Skip comments and empty lines
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
-            parts = line.split()
+            # Skip the H and He rows, which are empty. We will add these manually later.
+            parts = line.split() # Identify each column (files lack column headers)
             if len(parts) < 2:
                 continue
+            # First column is the species name, second is atomic number, third is abundance 
             species = parts[0]
             try:
-                atomic_number = int(parts[1])
+                atomic_number = int(parts[1]) # Ensure in integer format
             except ValueError:
                 continue
-            abundance = float(parts[2]) if len(parts) > 2 and parts[2] not in ('', '\x00') else np.nan
+            abundance = float(parts[2]) if len(parts) > 2 and parts[2] not in ('', '\x00') else np.nan # Handle missing values & convert to float
             rows.append((species, atomic_number, abundance))
     data = np.array(rows, dtype=dtype)
 
-    # Conditional treatment of abundance format
+    # Conditional treatment of abundance format into a consistent format.
     if format == 'fraction':
-        abundances = np.array([X_tot, Y_tot] + list(data['abundance'][2:] * Z_tot))
+        abundances = np.array([X_tot, Y_tot] + list(data['abundance'][2:] * Z_tot)) # Add the H and He abundances at the start
     elif format == 'log-12':
         abundances = np.array([10**(val-12) * Z_tot if not np.isnan(val) else np.nan for val in data['abundance']])
     else:
+        # Raise an error if the format is not recognized
         raise ValueError("Unknown abundance table format. Current options are 'fraction' or 'log-12'.")
 
+    # Create dictionary of abundances
     abund = dict(zip(data['species'], abundances))
 
-    # Put into a format that can be called easier
+    # Define a class for easier calling
     class ret:
         def __init__(self, X_tot_, Y_tot_, Z_tot_, abund_):
             self.X_tot = X_tot_
@@ -101,8 +107,49 @@ def read_abund_table(abund_filename, opac_filename, format="fraction"):
 
     return ret(X_tot, Y_tot, Z_tot, abund)
 
+def rho_to_R(rho, T):
+    """Converts density to R parameter used in opacity tables.
+
+    Parameters
+    ----------
+        rho : float
+            Density in g/cm^3 (linear).
+        T : float
+            Temperature in Kelvin (log).
+    
+    Returns
+    -------
+        R : float
+            R parameter used in opacity tables (log).
+    """
+    T = 10**T
+    R = rho / (T / 1e6)**3
+    return np.log10(R)
+
+def R_to_rho(R, T):
+    """Converts R parameter used in opacity tables to density.
+
+    Parameters
+    ----------
+        R : float
+            R parameter used in opacity tables (log).
+        T : float
+            Temperature in Kelvin (log).
+    
+    Returns
+    -------
+        rho : float
+            Density in g/cm^3 (linear).
+    """
+    R = 10**R
+    T = 10**T
+    rho = R * (T / 1e6)**3
+    return rho
+
 def nearest_opac_R(T, R, log_T, log_R, table):
     """Returns the nearest exact value from the Rosseland opacity table.
+
+    DO NOT USE. Here for archival purposes.
 
     Parameters
     ----------

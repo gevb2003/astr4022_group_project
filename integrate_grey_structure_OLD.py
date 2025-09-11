@@ -27,7 +27,7 @@ import saha_eos as saha
 
 #Our stellar parameters
 logg = 1.7
-Teff = 5500 * u.K
+Teff = 6500 * u.K
 
 #An optical depth grid
 tau_grid = np.arange(40)/10
@@ -35,6 +35,8 @@ prl_grid = -10 * np.ones(len(tau_grid))
 
 #Derived parameters
 g = 10**logg * u.cm/u.s**2
+
+
 
 
 # ===== WORK IN PROGRESS =====
@@ -58,32 +60,19 @@ chi_bar_l_interp = RectBivariateSpline(T_grid_chi, R_grid_chi, chi_bar_l)
 #P, n_e, ns, mu, Ui, gamma1, gamma2, gamma3, gamma1_old = eos.eos_rho_T(rho_grid_chi, T_grid_chi, full_output=True)
 
 #A function to find the Rosseland mean chi_bar
-def get_chi_bar_rho(T, rho):
+def get_chi_bar(T, p_cgs):
 	"""
-	Convert rho (in CGS units) to R in log base 10, and interpolate.
-	Since our new interpolator is on an R grid, we need to use R instead of P.
+	Convert pressure (in CGS units, value only) to R in log base 10, and interpolate.
+	Since our new interpolator is on an R grid, we need to convert P to R.
 	"""
-	if isinstance(rho, u.Quantity):
-		rho = rho.cgs.value
+	# Check if p has units (required for ns_from_P_T)
+	if not isinstance(p_cgs, u.Quantity):
+		p_cgs = p_cgs * u.dyne / u.cm**2
+	n_e, n_s, mu, Ui, rho = eos.ns_from_P_T(p_cgs, T)
 	R = np.log10((rho/(T.to(u.MK)**3)).value)
 	chi_bar = 10**(chi_bar_l_interp(R, np.log10(T.to(u.K).value), grid=False))*u.cm**2/u.g
 	return chi_bar
-
-def get_chi_bar_p(T, p_cgs):
-	"""
-	Convert pressure (in CGS units, value only) to log base 10, and interpolate.
-	For the purpose of solve_ivp, so needs to handle lists/arrays.
-	"""
-	if not isinstance(p_cgs, u.Quantity):
-		p_cgs = [p * u.dyne / u.cm**2 for p in p_cgs] # Ensure it has units for ns_from_P_T
-
-	chi_bar = [] # Create empty chi_bar list
-	for pressure in p_cgs:
-		n_e, n_s, mu, Ui, rho = eos.ns_from_P_T(pressure, T)
-		R = np.log10((rho/(T.to(u.MK)**3)).value)
-		chi = 10**(chi_bar_l_interp(R, np.log10(T.to(u.K).value), grid=False))
-		chi_bar.append(chi)
-	return chi_bar*u.cm**2/u.g
+# ============================
 
 #A function to find the tau derivative.
 def dpdtau(tau, p_cgs):
@@ -91,8 +80,9 @@ def dpdtau(tau, p_cgs):
 	Find dpdtau, assuming global variables g and Teff
 	"""
 	T = Teff * (3/4 * (tau + 2/3))**(1/4)
-	chi_bar = get_chi_bar_p(T, p_cgs) # Ensure we use the correct version of get_chi_bar
+	chi_bar = get_chi_bar(T, p_cgs)
 	return [(g/chi_bar).to(u.dyne/u.cm**2).value]
+
 
 #Use solve_ivp (better than Euler's method) to solve for p(tau) and state variables
 #Start at a "very low" pressure.
@@ -102,9 +92,7 @@ tau = soln.t
 T = Teff * (3/4 * (tau + 2/3))**(1/4) 
 N = (p/c.k_B/T).cgs
 rho = (N*u.u*mu_interp(np.log10(p.value), T.value, grid=False)).cgs
-#chi_bar_R = get_chi_bar(T, p.cgs.value)
-chi_bar_R = get_chi_bar_rho(T, rho) # Use correct version of get_chi_bar
-# ============================
+chi_bar_R = get_chi_bar(T, p.cgs.value)
 
 #Make a plot and discuss!
 plt.figure(1)
