@@ -14,7 +14,7 @@ from eos import *
 from opac import *
 
 #-----------------------STELLAR PARAMETERS INPUT-----------------------------
-Teff = 3000 * u.K
+Teff = 3000 # in units of kelvin
 logg = 1.0
 
 #-----------------------END OF INPUT-----------------------------
@@ -23,63 +23,131 @@ logg = 1.0
 g_cgs = 10**logg * u.cm/u.s**2
 
 
-# define tau grid
-tau_grid = np.linspace(0,5,100)
-#define grid for computing
-prl_grid = -10 * np.ones(len(tau_grid))
-
-# grey temperature profile 
-T_grid = Teff * (3/4 * (tau_grid + 2/3))**(1/4)
-
-# Solve for density as a function of optical depth 
-# use solve_ivp like Mike's code
-# estimate initial guess from hydrostatic equilibrium ???
-# boundary conditions (surface of star rho(tau=0) = 0)
+# import functions to read opacity tables from Grace
+from opacity_reader import *
+# Read in solar metallicity file 
+log_T, log_R, opac_table = read_opacity_table('caffau11.7.02.tron')
+# Define ranges of T and R 
+Tmin, Tmax = 10**log_T.min(), 10**log_T.max()
+Rmin, Rmax = 10**log_R.min(), 10**log_R.max()
 
 
-# Table required to import for finding density and pressure as functions of optical depth 
-# rosseland mean opacity
-# mu (average atomic weight)
-# as functions of temperature and pressure (?) 
+# Set to solar abundance 
+mu_sol = 1.3
 
-# for the purposes of starting the code use the same as Mike
-
-#Load in the tables
-archive = np.load('chi_mu_T_prl.npz')
-chi_bar_l = archive['arr_0']
-mu = archive['arr_1']
-T_grid = archive['arr_2']
-prl = archive['arr_3']
-chi_bar_l_interp = RectBivariateSpline(prl, T_grid, chi_bar_l)
-mu_interp = RectBivariateSpline(prl, T_grid, mu)
-
-
-#A function to find the Rosseland mean chi_bar
-def get_chi_bar(T, p_cgs):
+# Define function to get rosseland mean opacity from a pressure and optical depth
+def kappa_from_P_tau(P, tau):
 	"""
-	Convert pressure (in CGS units, value only) to log base 10, and interpolate.
-	"""
-	prl = np.log10(p_cgs)
-	chi_bar = 10**(chi_bar_l_interp(prl, T.to(u.K).value, grid=False))*u.cm**2/u.g
-	return chi_bar
+	Parameters
+	----------
+		P : Pressure in cgs units
+		tau : Optical depth scalar
 
-#A function to find the tau derivative.
-def dpdtau(tau, p_cgs):
+	Returns
+	---------
+		kappa : Rosseland mean opacity in cgs units interpolated from tables by Caffau et al (2011)
+
 	"""
-	Find dpdtau, assuming global variables g and Teff
-	"""
+
+
+	# Calculate the tempeature assuming a grey atmosphere
 	T = Teff * (3/4 * (tau + 2/3))**(1/4)
-	chi_bar = get_chi_bar(T, p_cgs)
-	return [(g_cgs/chi_bar).to(u.dyne/u.cm**2).value]
+
+	# Calculate density assuming the ideal gas law
+	rho_cgs = (P*u.dyne/u.cm**2 * mu_sol * c.m_p/(c.k_B * T*u.K)).cgs
+
+	T6 = T/1e6
+	R = rho_cgs.value / (T6**3)
+
+	# Check that given T and R values are within the range of the opacity table
+	if (T < Tmin) or (T > Tmax): 
+		raise ValueError(f'Temperature associated with given pressure and optical depth is outside the opacity table range. Please choose another pair of inputs')
+
+	if (R < Rmin) or (R > Rmax): 
+		raise ValueError(f'R value associated with given pressure and optical depth is outside the opacity table range. Please choose another pair of inputs')
+
+	# Find rosseland mean opacity for the corresponding temperaure and density 
+	log_kappa = interp_opac_R(T, R, log_T, log_R, opac_table) 
+	kappa = 10**log_kappa 
+
+	return kappa
 
 
-#Use solve_ivp (better than Euler's method) to solve for p(tau) and state variables
-#Start at a "very low" pressure as an initial guess
-soln = solve_ivp(dpdtau, [0,tau_grid[-1]], [1e-5])
+# Define function to get the derivative dPdtau = g/kappa
+def dpdtau(P, tau):
+	
+	# Get opacity from given parameters
+	kappa = kappa_from_P_tau(P, tau)
+	# define derivative in cgs units
+	derivative = g_cgs.value/kappa
+
+	return derivative
+
+# estimate the optical depth of the smallest pressure in the opacity tables
+P_init = 25 # cgs 
+frac_tol = 0.02 # fractional tolerance of convergence 
+
+small_tau = np.linspace(1e-4, 1e-2, 100)
+
+for tau in small_tau:
+
+	try:
+		kappa = kappa_from_P_tau(P_init, tau)
+	except ValueError as e:
+		print(e)
+		continue  # skip this tau if it's outside the table
+
+	# Constant kappa over optical depth step with 
+	P = g_cgs.value * tau / kappa
+
+	# retain optical depth value if it agrees with the initial pressure within the chosen tolerance
+	if np.abs(P - P_init) <= frac_tol * P_init:
+		tau_init = tau
+		break 
+	else:
+		continue
+
+# Initiate tau grid from this starting point
+tau_grid = np.linspace(tau_init, 5, 100)
+
+# solve differential equation with initial condition. 
+soln = solve_ivp(dpdtau, [tau_grid[0],tau_grid[-1]], [P_init], t_eval=tau_grid)
+
+# extract solution and optical depth grid
 p = soln.y[0]*u.dyne/u.cm**2
 tau = soln.t
-T = Teff * (3/4 * (tau + 2/3))**(1/4) 
-N = (p/c.k_B/T).cgs
-rho = (N*u.u*mu_interp(np.log10(p.value), T.value, grid=False)).cgs
-chi_bar_R = get_chi_bar(T, p.cgs.value)
+
+# Grey temperture profile
+Temp = Teff * (3/4 * (tau + 2/3))**(1/4)
+
+# compute density assuming the ideal gas law 
+rho = p * mu_sol * c.m_p/(c.k_B * Temp*u.K)
+
+
+
+
+
+#----------------PLOTS-------------------
+
+# Set up subplots
+fig, ax = plt.subplots(1,3,figsize=(15,5))
+
+# pressure
+ax[0].plot(tau_grid, p.cgs.value)
+ax[0].set_xlabel('Optical depth')
+ax[0].set_ylabel('Pressue (dyne/cm2)')
+
+# density
+ax[1].plot(tau_grid, rho.cgs.value)
+ax[1].set_xlabel('Optical Depth')
+ax[1].set_ylabel('Density (g/cm3)')
+
+# temperature
+ax[2].plot(tau_grid, Temp)
+ax[2].set_xlabel('Optical Depth')
+ax[2].set_ylabel('Temperature (K)')
+
+plt.tight_layout()
+fig.savefig("atmosphere_profiles.png", dpi=300, bbox_inches="tight")
+
 
