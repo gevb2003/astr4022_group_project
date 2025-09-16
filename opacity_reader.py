@@ -55,12 +55,14 @@ def read_abund_table(abund_filename, opac_filename, format="fraction"):
         abund : np.dict
             Dictionary containing abundance values with species names as keys.
             In linear cgs units.
+        atom : np.dict
+            Dictionary containing atomic numbers with species names as keys.
     """
     # Get X, Y, Z from the filename. File name is in the format [source].[X=0.x].[Z=0.z] E.g. Caffau11.7.02 has X = 0.7 and Z = 0.02
     parts = os.path.splitext(os.path.basename(opac_filename))[0].split('.') # Use OS to strip data from the filename
     X_tot = float('0.' + parts[1])
     Z_tot = float('0.' + parts[2])
-    Y_tot = 1 - X_tot - Z_tot
+    Y_tot = 1 - (X_tot + Z_tot)
 
     # Define desired datatype for each column
     dtype = [('species', 'U10'), ('atomic_number', int), ('abundance', float)]
@@ -96,55 +98,18 @@ def read_abund_table(abund_filename, opac_filename, format="fraction"):
 
     # Create dictionary of abundances
     abund = dict(zip(data['species'], abundances))
+    atom = dict(zip(data['species'], data['atomic_number']))
 
     # Define a class for easier calling
     class ret:
-        def __init__(self, X_tot_, Y_tot_, Z_tot_, abund_):
+        def __init__(self, X_tot_, Y_tot_, Z_tot_, abund_, atom_):
             self.X_tot = X_tot_
             self.Y_tot = Y_tot_
             self.Z_tot = Z_tot_
             self.abund = abund_
+            self.atom = atom_
 
-    return ret(X_tot, Y_tot, Z_tot, abund)
-
-def rho_to_R(rho, T):
-    """Converts density to R parameter used in opacity tables.
-
-    Parameters
-    ----------
-        rho : float
-            Density in g/cm^3 (linear).
-        T : float
-            Temperature in Kelvin (log).
-    
-    Returns
-    -------
-        R : float
-            R parameter used in opacity tables (log).
-    """
-    T = 10**T
-    R = rho / (T / 1e6)**3
-    return np.log10(R)
-
-def R_to_rho(R, T):
-    """Converts R parameter used in opacity tables to density.
-
-    Parameters
-    ----------
-        R : float
-            R parameter used in opacity tables (log).
-        T : float
-            Temperature in Kelvin (log).
-    
-    Returns
-    -------
-        rho : float
-            Density in g/cm^3 (linear).
-    """
-    R = 10**R
-    T = 10**T
-    rho = R * (T / 1e6)**3
-    return rho
+    return ret(X_tot, Y_tot, Z_tot, abund, atom)
 
 def nearest_opac_R(T, R, log_T, log_R, table):
     """Returns the nearest exact value from the Rosseland opacity table.

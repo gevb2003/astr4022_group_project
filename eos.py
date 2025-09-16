@@ -13,6 +13,7 @@ from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 import astropy.io.fits as pyfits
 from astropy.table import Table
+from opacity_reader import * # Add our table reader
 #For fsolve - no idea why this happens at high temperatures...
 import warnings
 plt.ion()
@@ -25,10 +26,10 @@ eV_Boltzmann_const = (u.eV/c.k_B).cgs.value
 deybe_const = (c.k_B/8/np.pi/c.e.esu**2).cgs.value
 delchi_const = (c.e.esu**2/(1*u.eV)).cgs.value
 
-def solarmet():
+def solarmet_OLD():
     """Return solar metalicity abundances by number and masses for low mass elements.
     From Asplund ete al (2009), up to an abundance of 1e-5 only plus Na, K, Ca. 
-    Degeneracy and ionization energies from IA05 in Scholz code
+    Degeneracy and ionization energies from IA05 in Scholz code. OLD VERSION FROM MIKE
     
     H++ is actually H-, and the code treats this appropriately as a special case"""
     elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti']) # Replace these with the abundances from the chosen Abundance Table
@@ -49,7 +50,31 @@ def solarmet():
     #about most elements in the doubly ionized state. 
     gIII = np.array([1,1,1,6,9,9,6,1,1,9,6,1,30,1])
     return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names # Will want to check that our abundances are in the same form as the above
+
+def solarmet():
+    """Return solar metalicity abundances by number and masses for low mass elements.
+    From Caffau et al (2011). Masses and ionization energies from NIST."""
+    abund_Caffau = read_abund_table("rosseland_opacities/Caffau11/abun.Caffau11.txt", "rosseland_opacities/Caffau11/caffau11.7.02.tron")
+    elt_names = np.array(list(abund_Caffau.atom.keys()), dtype=str)
+    elt_names = np.char.capitalize(elt_names) # Capitalise the first letter to match formatting of the rest of the code
+    n_p = np.array(list(abund_Caffau.atom.values()), dtype=int)
+    masses = np.array([1.0, 4.0,  6.94, 9.01, 10.81, 12.01, 14.01, 16.00, 19.00, 20.18, 22.99, 24.31, 26.98, 28.09, 30.97, 
+                       32.06, 35.45, 39.95, 39.10, 40.08, 44.96, 47.9, 50.94, 52.00, 54.94, 55.85, 58.93, 58.69])
+    abund = np.array(list(abund_Caffau.abund.values()), dtype=float)
+    # Ionization energies from NIST
+    ionI = np.array([13.595, 24.58, 5.391, 9.322, 8.298, 11.26, 14.53, 13.61, 17.42, 21.56, 5.14, 7.644, 5.985, 8.149, 10.486, 10.357, 
+                     12.967, 15.759, 4.339, 6.111, 6.561, 6.82, 6.746, 6.766, 7.434, 7.87, 7.881, 7.639])
+    ionII  =  np.array([-0.754,  54.403, 75.64, 18.211, 25.154, 24.376,29.593,35.108, 34.970, 40.96, 47.29, 15.03, 18.828, 6.34, 19.769, 
+                        23.40, 23.813, 27.629, 31.81, 11.87, 12.799, 13.57, 14.634, 16.486, 15.64, 16.18, 17.084, 18.168])
     
+    gI =   np.array([2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,1,10,21,28,7,6,25,28,21]) # Update to match the chosen abundances
+    gII =  np.array([1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,15,28,25,6,7,30,21,10])
+    gIII = np.array([1,1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,10,18,28,25,6,30,28,21])
+    #A lot of these degeneracies are educated guesses! But we're not worried
+    #about most elements in the doubly ionized state. 
+    
+    return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names
+
 def equilibrium_equation(rho, T):
     """Find the components of the chemical equilibrium equation in matrix form.
     
@@ -660,7 +685,7 @@ def rho_s_tables(rhos, ss, savefile=''):
 
 def P_T_tables(Ps, Ts, savefile=''):
     """
-    For an array of densities and specific entropies, create tables of
+    For an array of pressures and temperatures, create tables of
     density (TODO: gammas and entropy).
     
     Pressures are assumed in a logarithmic grid.
@@ -793,8 +818,9 @@ if __name__=='__main__':
     #Test 4: Make an equation of state table
     if True:
         Ps = np.logspace(-4,6,41)*u.dyn/u.cm**2
-        Ts = (2000 + 500*np.arange(47))*u.K
-        P_T_tables(Ps, Ts, savefile='rho_Ui_mu_ns_ne_Q_cP.fits')
+        #Ts = (2000 + 500*np.arange(47))*u.K
+        Ts = (2000 + 100*np.arange(47))*u.K
+        P_T_tables(Ps, Ts, savefile='rho_Ui_mu_ns_ne_Q_cP_TEST.fits')
         
         
         

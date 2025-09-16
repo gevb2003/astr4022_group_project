@@ -102,7 +102,6 @@ tau = soln.t
 T = Teff * (3/4 * (tau + 2/3))**(1/4) 
 N = (p/c.k_B/T).cgs
 rho = (N*u.u*mu_interp(np.log10(p.value), T.value, grid=False)).cgs
-#chi_bar_R = get_chi_bar(T, p.cgs.value)
 chi_bar_R = get_chi_bar_rho(T, rho) # Use correct version of get_chi_bar
 # ============================
 
