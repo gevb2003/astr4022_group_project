@@ -20,14 +20,14 @@ from scipy.special import voigt_profile
 from scipy.integrate import cumulative_trapezoid
 from scipy.special import expn
 from opacity_reader import *
+from astropy.io import fits
 
 #From earlier in the course
 import saha_eos as saha
-# Might want to update the above to use regular EOS with the chemical equilibrium solver
 
 #Our stellar parameters
 logg = 1.7
-Teff = 5500 * u.K
+Teff = 6500 * u.K
 
 #An optical depth grid
 tau_grid = np.arange(40)/10
@@ -39,12 +39,19 @@ g = 10**logg * u.cm/u.s**2
 
 # ===== WORK IN PROGRESS =====
 # Load in the tables
-# For now, we need to use the old interpolator file for mu
-archive = np.load('chi_mu_T_prl.npz')
-mu = archive['arr_1']
-T_grid_mu = archive['arr_2']
-prl_mu = archive['arr_3']
-mu_interp = RectBivariateSpline(prl_mu, T_grid_mu, mu)
+# Use our new mu data from eos.py
+hdul = fits.open("rho_Ui_mu_ns_ne_Q_cP_TEST.fits")
+rho_eos = hdul[0].data        # HDU 0: rho [g/cm**3]
+Ui_eos = hdul[1].data         # HDU 1: Ui [erg/g]
+mu_eos = hdul[2].data         # HDU 2: mu
+ns_eos = hdul[3].data         # HDU 3: ns [cm^-3]
+ne_eos = hdul[4].data         # HDU 4: n_e [cm^-3]
+Q_eos = hdul[5].data          # HDU 5: Q
+cP_eos = hdul[6].data         # HDU 6: cP [erg/K/g]
+hdul.close()
+Ps_eos = np.logspace(-4,6,41) # u.dyn/u.cm**2
+Ts_eos = (2000 + 100*np.arange(47)) # u.K
+mu_interp = RectBivariateSpline(Ps_eos, Ts_eos, mu_eos)
 
 # Then import our own Rosseland Mean Opacity table
 T_grid_chi, R_grid_chi, chi_bar_l = read_opacity_table('rosseland_opacities/Caffau11/caffau11.7.02.tron')
