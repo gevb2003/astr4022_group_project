@@ -78,7 +78,8 @@ def equilibrium_equation(rho, T):
     #The theta value for computing the molecular equilibrium constants
     th = 5040/T.to(u.K).value
     #The equivalent for the  atoms
-    eV_kTln10 = float(1*u.eV/c.k_B/T/np.log(10))
+    eV_kTln10 = float((1*u.eV/c.k_B/T/np.log(10)).decompose().value)
+    
     
     #First, the electron equation
     linear_matrix[0,1+natom:1+2*natom] = 1

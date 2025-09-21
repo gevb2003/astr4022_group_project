@@ -17,6 +17,9 @@ from opac import *
 Teff = 3000 # in units of kelvin
 logg = 1.0
 
+# toggle for plotting density, pressure and tempeature profiles
+plot_profiles = False
+
 #-----------------------END OF INPUT-----------------------------
 
 # derived parameters
@@ -129,25 +132,50 @@ rho = p * mu_sol * c.m_p/(c.k_B * Temp*u.K)
 
 #----------------PLOTS-------------------
 
-# Set up subplots
-fig, ax = plt.subplots(1,3,figsize=(15,5))
+if plot_profiles == True:
 
-# pressure
-ax[0].plot(tau_grid, p.cgs.value)
-ax[0].set_xlabel('Optical depth')
-ax[0].set_ylabel('Pressue (dyne/cm2)')
+	# set up subplots
+	fig, ax = plt.subplots(1,3,figsize=(15,5))
 
-# density
-ax[1].plot(tau_grid, rho.cgs.value)
-ax[1].set_xlabel('Optical Depth')
-ax[1].set_ylabel('Density (g/cm3)')
+	# pressure
+	ax[0].plot(tau_grid, p.cgs.value)
+	ax[0].set_xlabel('Optical depth')
+	ax[0].set_ylabel('Pressue (dyne/cm2)')
 
-# temperature
-ax[2].plot(tau_grid, Temp)
-ax[2].set_xlabel('Optical Depth')
-ax[2].set_ylabel('Temperature (K)')
+	# density
+	ax[1].plot(tau_grid, rho.cgs.value)
+	ax[1].set_xlabel('Optical Depth')
+	ax[1].set_ylabel('Density (g/cm3)')
 
-plt.tight_layout()
-fig.savefig("atmosphere_profiles.png", dpi=300, bbox_inches="tight")
+	# temperature
+	ax[2].plot(tau_grid, Temp)
+	ax[2].set_xlabel('Optical Depth')
+	ax[2].set_ylabel('Temperature (K)')
+
+	plt.tight_layout()
+	fig.savefig("atmosphere_profiles.png", dpi=300, bbox_inches="tight")
 
 
+#----------------------EQUATION OF STATE---------------------
+
+
+# get pressure arrays for atomic and molecular species also a function of optical depth
+
+# key for pressure output
+key = ['e', 'H', 'He', 'C', 'N', 'O', 'Ne', 'Na', 'Mg', 'Si', 'S', 'K', 'Ca', 'Fe', 'Ti', 
+	   'H+', 'He+', 'C+', 'N+', 'O+', 'Ne+', 'Na+', 'Mg+', 'Si+', 'S+', 'K+', 'Ca+', 'Fe+', 'Ti+',
+	   'NN', 'TiO', 'TiO2', 'MgN', 'CaH', 'HH', 'CO', 'HOH', 'OH', 'H-']
+
+# initiate 2d table to store number densities 
+ns = np.empty(shape=(len(key), len(tau_grid)))
+
+for i in range(len(tau_grid)):
+	# get log pressure in cgs units of the various atomic and molecular species 
+	logp = equilibrium_solve(rho[i], Temp[i]*u.K, plot=False)
+	p = 10**logp*u.dyne*u.cm**-2
+
+	# convert pressures to number densities assuming ideal gas law
+	n = (p/(c.k_B * Temp[i]*u.K)).cgs
+
+	# append entire row to table
+	ns[:, i] = n.value
