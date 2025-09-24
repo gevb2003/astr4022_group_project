@@ -19,7 +19,7 @@ plt.ion()
 warnings.filterwarnings('ignore', 'The iteration is not making good progress')
 tsuji_K = Table.read('tsuji_K.dat', format='ascii.fixed_width_no_header', \
  names=('mol', 'c0', 'c1', 'c2','c3','c4','molcode','ediss','comment'), col_starts=(0,7,19,31,43,55,67,80,87))
-
+# Above is where he imports the molecular data from Tsuji (1973). Will need to update with our exomol abundances
 debroglie_const = (c.h**2/2/np.pi/c.m_e/c.k_B).cgs.value
 eV_Boltzmann_const = (u.eV/c.k_B).cgs.value
 deybe_const = (c.k_B/8/np.pi/c.e.esu**2).cgs.value
@@ -31,7 +31,7 @@ def solarmet():
     Degeneracy and ionization energies from IA05 in Scholz code
     
     H++ is actually H-, and the code treats this appropriately as a special case"""
-    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti'])
+    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti']) # Replace these with the abundances from the chosen Abundance Table
     n_p =        np.array([1,   2,      6,     7,     8,     10,    11,    12,    14,    16,    19,    20,    26,     22])
     masses=      np.array([1.0, 4.0,    12.01, 14.01, 16.00, 18.0,  22.99, 24.31, 28.09, 32.06, 39.10, 40.08, 55.85, 47.9])
     abund = 10**(np.array([12, 10.93,   8.43,  7.83,  8.69,  7.93,  6.24,  7.60,  7.51,  7.12,  5.03,  6.34,  7.50, 4.95])-12)
@@ -42,7 +42,7 @@ def solarmet():
     #as it is really a partition function. But as this is mostly H/He plus 
     #other elements as a mass reservoir and source of low-T
     #electrons, we're ignoring this. 
-    gI =   np.array([2,1,9,4,9,1,2,1,9,9,2,1,25,21])
+    gI =   np.array([2,1,9,4,9,1,2,1,9,9,2,1,25,21]) # Update to match the chosen abundances
     gII =  np.array([1,2,6,9,4,6,1,2,6,4,1,2,30,28])
     
     #A lot of these degeneracies are educated guesses! But we're not worried
@@ -55,6 +55,8 @@ def equilibrium_equation(rho, T):
     
     There are two parts - linear in partial pressures and logarithmic in 
     partial pressures. 
+
+    Will take the input from the rosseland opacity table which has logT and logR (density?)
     """
     #Input constants and abundances
     abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names = solarmet()

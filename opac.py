@@ -40,9 +40,11 @@ ev_kB_cgs = (1*u.eV/c.k_B).cgs.value
 
  #Element abundances
 abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names = eos.solarmet()
+# Will need to replace the above with the chosen element abundances + exomol stuff
 
 nelt = len(abund)
 # Read on strong_lines and weak_lines files
+# Our molecular lines will need to be put in a similar format, and perhaps defined in their own function molecular_line_kappa
 strong_lines = fits.getdata('strong_lines.fits',1)
 strong_nu = c.c.to(u.AA/u.s).value/strong_lines['wavelength']
 weak_lines = fits.getdata('weak_lines.fits',1)
@@ -57,6 +59,7 @@ for name in line_elts:
     ion_indices[name] = np.where((weak_lines['element_name'] == name) & (weak_lines['ion_state']==2))[0]
 
 # Read in the equation of state and make the relevant 2D interpolation functions
+# This uses saha_eos instead of regular eos --> will need to update to include chemical equilibrium
 f_eos = fits.open('saha_eos.fits')
 h = f_eos[0].header
 Ts = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
@@ -227,6 +230,9 @@ def strong_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
                 kappa[start_idx:end_idx] += this_kappa * voigt_profile(nu[start_idx:end_idx] - line_nu, doppler_dnu/np.sqrt(2), Gamma/4/np.pi)
     return kappa
 
+# Will want to write a molecular_line_kappa function. Will need the higher microturbulence parameter as mentioned by Kritika
+
+# Hmin is NOT the dominant opacity in these objects. We may want to create similar functions for TiO and H2O
 def Hmbf(nu, T):
     """Compute the Hydrogen minus bound-free cross sections in cgs units as a
     function of temperature in K. Computed per atom. Compute using:
@@ -321,7 +327,7 @@ def kappa_cont(nu, log10P, T):
     ne = 10**(log10ne(log10P, T, grid=False))
     kappa = nHI * Hbf(nu, T) + nHII * ne * Hff(nu, T) + \
             nHm * Hmbf(nu, T) + nHI * ne * Hmff(nu, T)
-    return kappa
+    return kappa # Again, will want to use TiO and H2O in the above instead of Hmin and H
 
 def kappa_cont_H(nu, T, nHI, nHII, nHm, ne):
     """Compute the continuum opacity in cgs units as a function of
@@ -339,7 +345,7 @@ if __name__=="__main__":
     nu = dnu*np.arange(1000) + dnu/2
     natoms = f_eos['ns [cm^-3]'].data.shape[2]//3
     kappa_bar_Planck = np.zeros_like(f[0].data)
-    kappa_bar_Ross = np.zeros_like(f[0].data)
+    kappa_bar_Ross = np.zeros_like(f[0].data) # When called in terminal, this file generates Rosseland opacities, which we already have. We instead want to interpolate ours onto the correct grid
     for i, P_log10 in enumerate(Ps_log10):
         for j, T in enumerate(Ts):
             nHI = f_eos['ns [cm^-3]'].data[i,j,0]
@@ -351,8 +357,8 @@ if __name__=="__main__":
             #Now compute the Rosseland and Planck means.
             Bnu = nu**3/(np.exp(h_kB_cgs*nu/T)-1)
             dBnu = nu**4 * np.exp(h_kB_cgs*nu/T)/(np.exp(h_kB_cgs*nu/T)-1)**2
-            kappa_bar_Planck[i,j] = np.sum(kappa*Bnu)/np.sum(Bnu)/rho[i,j]
-            kappa_bar_Ross[i,j] = 1/(np.sum(dBnu/kappa)/np.sum(dBnu))/rho[i,j]
+            kappa_bar_Planck[i,j] = np.sum(kappa*Bnu)/np.sum(Bnu)/rho[i,j] # Need to update to match our rosseland opacities
+            kappa_bar_Ross[i,j] = 1/(np.sum(dBnu/kappa)/np.sum(dBnu))/rho[i,j] # this is the mass weighted opacity - will need to import kappa ross first
             if (i==30): #This is log_10(P)=3.5 - similar to solar photosphere.
                 if ((j < 18) & (j % 2 == 0)):
                     plt.loglog(3e8/nu, kappa/rho[i,j], label=f'T={T}K')
