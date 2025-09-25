@@ -120,6 +120,7 @@ plt.xlabel(r'$\tau_R$')
 plt.ylabel(r'N (cm$^{-3}$)')
 plt.title('Canopus-like grey atmosphere')
 plt.tight_layout()
+plt.savefig('figures/grey_structure_fig1.pdf', dpi=300)
 
 #------------ From Lecture 7 ---------------
 #Now lets make a frequency grid, based on a wavelength grid.
@@ -166,6 +167,7 @@ plt.clf()
 plt.plot(T, N_CaII/N / np.max(N_CaII/N))
 plt.ylabel('Ca single ionized fraction')
 plt.xlabel('T (K)')
+plt.savefig('figures/grey_structure_fig2.pdf', dpi=300)
 
 #Now, finally we can compute our wavelengt-dependent chi_bar! We'll approximate the
 #continuum opacity as the Rosseland mean opacity
@@ -177,6 +179,7 @@ plt.clf()
 plt.semilogy(wave, chi_bar_nu)
 plt.xlabel('Wavelength (nm)')
 plt.ylabel(r'$\bar{\chi}_\nu$ (cm$^2$/g)')
+plt.savefig('figures/grey_structure_fig3.pdf', dpi=300)
 
 #To compute a line profile, we need flux, which means we first need tau_nu
 #For simplicity, lets just do a trapezoidal rule integration
@@ -189,6 +192,7 @@ plt.semilogy(wave, tau_nu)
 plt.xlabel('Wavelength (nm)')
 plt.ylabel(r'$\tau_\nu$ (cm$^2$/g)')
 plt.axis([392,395,0.01,100])
+plt.savefig('figures/grey_structure_fig4.pdf', dpi=300)
 
 #To do an LTE calculation we'll need the Planck function (equal to the source function)
 def Bnu(nu, T):
@@ -221,4 +225,5 @@ plt.plot(wave, Flambda_trapz, label='Trapezoidal')
 plt.xlabel('Wavelength (nm)')
 plt.ylabel(r'F$_\lambda$ (W/m$^2$/nm)')
 plt.tight_layout()
+plt.savefig('figures/grey_structure_fig5.pdf', dpi=300)
 
