@@ -89,7 +89,7 @@ def equilibrium_equation(rho, T):
     #atomic Hydrogen only.
     log_P_ref = np.log10( (rho*c.k_B*T/u.u).to(u.dyn/u.cm**2).value )
     nmol = len(tsuji_K) # This is our molecule input - replace with ExoMol data
-    natom = len(abund) # This is our other abundance input - replace with Caffau data
+    natom = len(abund)
     
     #The linear matrix, with one equation (row) per atom,  one
     #for the electron.
@@ -127,7 +127,7 @@ def equilibrium_equation(rho, T):
         log_matrix[i,1+i+natom] = 1
         
     #Next, the molecular part of the equation
-    for i in range(nmol):
+    for i in range(nmol): # Need up to update for our exomol format
         log_matrix[natom + i, 2*natom+1+i] = -1
         mol = tsuji_K[i]
         log_b[natom + i] = mol['c0'] + mol['c1']*th + mol['c2']*th**2 + mol['c3']*th**3 + mol['c4']*th**4
@@ -199,19 +199,19 @@ def equilibrium_solve(rho, T, plot=False):
     x0[len(abund)+1+np.arange(len(abund))] = logp_atom[3*np.arange(len(abund))+1] #ions
     
     #Deplete H, C, O, N, Ti just a little to stop the algorithm getting stuck.
-    x0[1] -= 0.4
-    x0[3] -= 0.2
-    x0[4] -= 0.2
-    x0[5] -= 0.4
-    x0[14] -= 0.3
+    # Update the indeces to match new abundances
+    x0[1] -= 0.4 # H
+    x0[6] -= 0.2 # C
+    x0[7] -= 0.2 # O
+    x0[8] -= 0.4 # N
+    x0[22] -= 0.3 # Ti
     
     #Also start the most abundant molecules as 0.5 dex less than their limiting constituent
+    # NEED TO UPDATE THIS
     x0[-4] = x0[1]-0.5
     x0[-3] = x0[3]-0.5
     x0[-2] = x0[5]-0.5
     x0[-1] = x0[5]-0.5
-    
-    # Are all the above things that we should be keeping??
 
     #Now solve for the abundances of the molecules!
     res = op.root(eq_solve_func, x0, args=(linear_matrix, linear_b, log_matrix, log_b, log_P_ref, abund),method='lm')#, )
@@ -219,16 +219,16 @@ def equilibrium_solve(rho, T, plot=False):
     #For testing, we can make a plot here!
     if plot:
         natom = len(abund)
-        nmol = len(tsuji_K['mol'])
+        nmol = len(tsuji_K['mol']) # Update here as well
         plt.clf()
-        plt.xticks(np.arange(natom + nmol), np.concatenate((elt_names, tsuji_K['mol'].data)))
+        plt.xticks(np.arange(natom + nmol), np.concatenate((elt_names, tsuji_K['mol'].data))) # Update here as well
         plt.plot(x0[1:natom+1], 'ro')
         plt.plot(x0[natom+1:], 'go')
         plt.plot([x0[0]], 'rs')
         plt.plot(res.x[1:natom+1],'r', label='Neutral solution')
         plt.plot(res.x[natom+1:],'g', label='Ionised solution')
         plt.plot([res.x[0]], 'kx', label='Electron solution')
-        plt.plot([logp_atom[2]], 'ko', label='H-')
+        plt.plot([logp_atom[2]], 'ko', label='H-') # Will want to change this to the actual continuum opacity, TiO
         plt.legend()
         if (np.min(res.x) < -20):
             plt.ylim([-25,np.max(res.x)+0.5])
@@ -267,7 +267,7 @@ def electron_pressure(n_e, T):
     
 def simplified_eos_rho_T(rho, T, ionised=True):
     """Assume that H and He are ionised. Return the gas pressure for this density and
-    the adiabatic gamma
+    the adiabatic gamma. WE MAY NOT WANT TO USE THIS FOR LOW T VERSION.
     
     Parameters
     ----------
@@ -764,7 +764,44 @@ def P_T_tables(Ps, Ts, savefile=''):
             hdulist = pyfits.HDUList([hdu1, hdu2, hdu3, hdu4, hdu5,hdu6,hdu7])
             hdulist.writeto(savefile, overwrite=True)
     return rho_tab, Ui_tab, mu_tab, ns_tab
-        
+
+def R_T_tables(Rs, Ts, savefile=''):
+    """
+    For an array of density and temperatures, create tables of
+    density (TODO: gammas and entropy). R = rho/(T6)^3
+    
+    Both inputs are in logarithmic grids.
+    
+    Parameters
+    ----------
+    Rs : array
+        input density list.
+    Ts : array
+        input temperature list.
+
+    Returns
+    -------
+    density, pressure, internal energy, number densities tables
+
+    """
+    nR = len(Rs)
+    nT = len(Ts)
+    Rs = 10**Rs
+    Ts = 10**Ts
+    rho_tab = np.empty((nR, nT))
+    P_tab = np.empty((nR, nT))
+    mu_tab = np.empty((nR, nT))
+    Ui_tab = np.empty((nR,nT))
+    Q_tab = np.empty((nR,nT))
+    cP_tab = np.empty((nR,nT))
+    
+    # Create the rho grid from R and T
+    for i, R in enumerate(Rs):
+        for j, T in enumerate(Ts):
+            rho_tab[i,j] = R*(T[j].to(u.K).value/1e6)**3
+
+
+    
 
 if __name__=='__main__':
 	#Here are a series of simple standalone tests, which you can run if you want!
@@ -815,8 +852,16 @@ if __name__=='__main__':
         for i in range(len(T_tab)):
             plt.plot(rhos.value, T_tab[i])
             
-    #Test 4: Make an equation of state table
+    #Test 4: Make an equation of state table (OLD VER)
+    if False:
+        Ps = np.logspace(-4,6,41)*u.dyn/u.cm**2
+        #Ts = (2000 + 500*np.arange(47))*u.K
+        Ts = (2000 + 100*np.arange(47))*u.K
+        P_T_tables(Ps, Ts, savefile='rho_Ui_mu_ns_ne_Q_cP_TEST.fits')
+
+    # Test 5: Make an equation of state table (NEW VER)
     if True:
+        #
         Ps = np.logspace(-4,6,41)*u.dyn/u.cm**2
         #Ts = (2000 + 500*np.arange(47))*u.K
         Ts = (2000 + 100*np.arange(47))*u.K
