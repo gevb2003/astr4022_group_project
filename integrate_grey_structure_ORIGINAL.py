@@ -13,14 +13,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import astropy.units as u
 import astropy.constants as c
-import eos as eos
 from scipy.interpolate import RectBivariateSpline
 from scipy.integrate import solve_ivp
 from scipy.special import voigt_profile
 from scipy.integrate import cumulative_trapezoid
 from scipy.special import expn
-from opacity_reader import *
-from astropy.io import fits
 
 #From earlier in the course
 import saha_eos as saha
@@ -36,61 +33,23 @@ prl_grid = -10 * np.ones(len(tau_grid))
 #Derived parameters
 g = 10**logg * u.cm/u.s**2
 
-
-# ===== WORK IN PROGRESS =====
-# Load in the tables
-# Use our new mu data from eos.py
-hdul = fits.open("rho_Ui_mu_ns_ne_Q_cP_TEST.fits")
-rho_eos = hdul[0].data        # HDU 0: rho [g/cm**3]
-Ui_eos = hdul[1].data         # HDU 1: Ui [erg/g]
-mu_eos = hdul[2].data         # HDU 2: mu
-ns_eos = hdul[3].data         # HDU 3: ns [cm^-3]
-ne_eos = hdul[4].data         # HDU 4: n_e [cm^-3]
-Q_eos = hdul[5].data          # HDU 5: Q
-cP_eos = hdul[6].data         # HDU 6: cP [erg/K/g]
-hdul.close()
-Ps_eos = np.logspace(-4,6,41) # u.dyn/u.cm**2
-Ts_eos = (2000 + 100*np.arange(47)) # u.K
-mu_interp = RectBivariateSpline(Ps_eos, Ts_eos, mu_eos)
-
-# Then import our own Rosseland Mean Opacity table
-T_grid_chi, R_grid_chi, chi_bar_l = read_opacity_table('rosseland_opacities/Caffau11/caffau11.7.02.tron')
-# RectBivariateSpline requires ascending order. Need to flip T_grid_chi and chi_bar_l.
-T_grid_chi = T_grid_chi[::-1]
-chi_bar_l = chi_bar_l[::-1,:]
-chi_bar_l_interp = RectBivariateSpline(T_grid_chi, R_grid_chi, chi_bar_l)
-
-#rho_grid_chi = R_to_rho(R_grid_chi, T_grid_chi)
-# Get pressure and other values from eos functions
-#P, n_e, ns, mu, Ui, gamma1, gamma2, gamma3, gamma1_old = eos.eos_rho_T(rho_grid_chi, T_grid_chi, full_output=True)
+#Load in the tables
+archive = np.load('chi_mu_T_prl.npz') # We need an updated version of this file with our rosseland chi bar etc
+chi_bar_l = archive['arr_0']
+mu = archive['arr_1']
+T_grid = archive['arr_2']
+prl = archive['arr_3']
+chi_bar_l_interp = RectBivariateSpline(prl, T_grid, chi_bar_l)
+mu_interp = RectBivariateSpline(prl, T_grid, mu)
 
 #A function to find the Rosseland mean chi_bar
-def get_chi_bar_rho(T, rho):
-	"""
-	Convert rho (in CGS units) to R in log base 10, and interpolate.
-	Since our new interpolator is on an R grid, we need to use R instead of P.
-	"""
-	if isinstance(rho, u.Quantity):
-		rho = rho.cgs.value
-	R = np.log10((rho/(T.to(u.MK)**3)).value)
-	chi_bar = 10**(chi_bar_l_interp(R, np.log10(T.to(u.K).value), grid=False))*u.cm**2/u.g
-	return chi_bar
-
-def get_chi_bar_p(T, p_cgs):
+def get_chi_bar(T, p_cgs):
 	"""
 	Convert pressure (in CGS units, value only) to log base 10, and interpolate.
-	For the purpose of solve_ivp, so needs to handle lists/arrays.
 	"""
-	if not isinstance(p_cgs, u.Quantity):
-		p_cgs = [p * u.dyne / u.cm**2 for p in p_cgs] # Ensure it has units for ns_from_P_T
-
-	chi_bar = [] # Create empty chi_bar list
-	for pressure in p_cgs:
-		n_e, n_s, mu, Ui, rho = eos.ns_from_P_T(pressure, T)
-		R = np.log10((rho/(T.to(u.MK)**3)).value)
-		chi = 10**(chi_bar_l_interp(R, np.log10(T.to(u.K).value), grid=False))
-		chi_bar.append(chi)
-	return chi_bar*u.cm**2/u.g
+	prl = np.log10(p_cgs)
+	chi_bar = 10**(chi_bar_l_interp(prl, T.to(u.K).value, grid=False))*u.cm**2/u.g
+	return chi_bar
 
 #A function to find the tau derivative.
 def dpdtau(tau, p_cgs):
@@ -98,8 +57,9 @@ def dpdtau(tau, p_cgs):
 	Find dpdtau, assuming global variables g and Teff
 	"""
 	T = Teff * (3/4 * (tau + 2/3))**(1/4)
-	chi_bar = get_chi_bar_p(T, p_cgs) # Ensure we use the correct version of get_chi_bar
+	chi_bar = get_chi_bar(T, p_cgs)
 	return [(g/chi_bar).to(u.dyne/u.cm**2).value]
+
 
 #Use solve_ivp (better than Euler's method) to solve for p(tau) and state variables
 #Start at a "very low" pressure.
@@ -109,8 +69,7 @@ tau = soln.t
 T = Teff * (3/4 * (tau + 2/3))**(1/4) 
 N = (p/c.k_B/T).cgs
 rho = (N*u.u*mu_interp(np.log10(p.value), T.value, grid=False)).cgs
-chi_bar_R = get_chi_bar_rho(T, rho) # Use correct version of get_chi_bar
-# ============================
+chi_bar_R = get_chi_bar(T, p.cgs.value)
 
 #Make a plot and discuss!
 plt.figure(1)
