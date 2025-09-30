@@ -8,6 +8,8 @@ from scipy.interpolate import RectBivariateSpline
 from scipy.special import voigt_profile
 plt.ion()
 from scipy.interpolate import interp1d
+from partition_function import *
+from eos import equilibrium_solve
 
 """
 This is based on:
@@ -264,8 +266,8 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
 	   'H+', 'He+', 'C+', 'N+', 'O+', 'Ne+', 'Na+', 'Mg+', 'Si+', 'S+', 'K+', 'Ca+', 'Fe+', 'Ti+',
 	   'NN', 'TiO', 'TiO2', 'MgN', 'CaH', 'HH', 'CO', 'HOH', 'OH', 'H-']
 
-    # list names of molecules that have number densities from equilibrium_solve
-    molecules = ['NN', 'TiO', 'TiO2', 'MgN', 'CaH', 'HH', 'CO', 'HOH', 'OH']
+    # list names of molecules that have exomol data for 
+    molecules = ['TiO', 'VO', 'CN', 'CO', 'H2O']
 
     # loop through each molecule
     for name in molecules:
@@ -276,8 +278,28 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
         # get number density 
         n = ns[idx_mol]
 
-        # read in exomol partition data for this molecule
-        pf =
+        # read in exomol data for this molecule
+        # states file
+        states_file_path = get_exomol_states(name)
+        states = read_exomol_states(name, states_file_path)
+
+        # trans file
+        trans_file_path = get_exomol_trans(name)
+        trans = read_exomol_trans(name, trans_file_path)
+
+        # partition function file
+        pf = read_exomol_pf(name)
+
+        # definitions file for the molecular mass
+        def_file = read_exomolweb_def(name)
+        #molecular mass
+        mass_line = next(line for line in def_file if "Isotopologue mass" in line)
+        parts = mass_line.split("#")[0].split()
+        mass = float(parts[0])*u.u
+        # lifetime
+        lifetime_line = next((line for line in def_file if "Lifetime availability" in line), None)
+        lifetime_toggle = lifetime_line.split("#")[0].split()[0]
+
 
         # get partition function from ExoMol
         Z_array = pf[1] 
@@ -288,13 +310,9 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
         
         # Find partition function at the input temperature
         Zpart = Zpart_interp(T.cgs.value)
-        
-        # get information about transitions from the states and trans exomol files
-        states = 
-        trans =   # figure out how to import the data from exomol files
 
         #Compute doppler velocity 
-        doppler_v = np.sqrt(2*(c.k_B* T) / (mass*u.u)).to(u.km/u.s).value
+        doppler_v = np.sqrt(2*(c.k_B* T) / (mass)).to(u.km/u.s).value
         doppler_dlnu = np.sqrt(doppler_v**2 + microturb**2)/c.c.to(u.km/u.s).value
 
         # loop over each line for this molecule
@@ -324,16 +342,38 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
     
             # make kappa distribution, line shape depending on the chosen line profile
             if line_profile == 'Voigt':
-
+                        # Need to deal with pressure broadening??? 
                 # calculate Gamma for line broadening 
+                # use the life time of the upper state if avaliable
+                if lifetime_toggle == 1:
+                    # extract the lifetime of the upper state 
+                    lifetime = states[5]*u.s
 
+                    # Gamma is the inverse of the lifetime
+                    Gamma = 1/lifetime
+                else:
+                    print("No lifetime data available, using only Doppler broadening")
+                    Gamma = 0*u.s**-1
+
+
+                idx_range = int(0.03/dlnu)
+                # find start and end indices within +/- 3 doppler widths
+                line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                start_idx = np.maximum(line_idx - idx_range, 0)
+                end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
 
                 # make voight profile
                 kappa[start_idx:end_idx] += this_kappa * voigt_profile(nu[start_idx:end_idx] - line_nu, doppler_dnu/np.sqrt(2), Gamma/4/np.pi)
             elif line_profile == 'Gaussian':
-                # make gaussian profile
-                gaussian = np.exp(-((nu - line_nu)/doppler_dnu)**2)/(doppler_dnu * np.sqrt(np.pi))
-                kappa += this_kappa * gaussian
+                
+                # Find start and end indices within 3 sigma
+                idx_range = int(3*doppler_dlnu/dlnu)
+                line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                start_idx = np.maximum(line_idx - idx_range, 0)
+                end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
+
+                # scale gaussian line profile by kappa. 
+                kappa[start_idx:end_idx] += this_kappa * np.exp(-((nu[start_idx:end_idx] - line_nu)/doppler_dnu)**2)/(doppler_dnu * np.sqrt(np.pi))
             else:
                 raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
     
