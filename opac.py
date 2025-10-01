@@ -256,8 +256,10 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
     # get density, assuming ideal gas law. Assuming solar metallicity with mu = 1.3
     rho = P/(1.3 * c.m_p * c.k_B * T)
 
-    # get number density of all species
-    ns = equilibrium_solve(rho, T)
+    # get pressure of all species
+    Ps = equilibrium_solve(rho, T)
+    #convert to number density in cgs
+    ns = Ps/(c.k_B * T)
     # extract free electrons and neutral Hydrogen number density for broadening???
     n_e = ns[0]
     n_H = ns[1]
