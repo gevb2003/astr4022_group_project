@@ -31,13 +31,13 @@ def solarmet_OLD():
     From Asplund ete al (2009), up to an abundance of 1e-5 only plus Na, K, Ca. 
     Degeneracy and ionization energies from IA05 in Scholz code. OLD VERSION FROM MIKE
     
-    H++ is actually H-, and the code treats this appropriately as a special case"""
-    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti']) # Replace these with the abundances from the chosen Abundance Table
-    n_p =        np.array([1,   2,      6,     7,     8,     10,    11,    12,    14,    16,    19,    20,    26,     22])
-    masses=      np.array([1.0, 4.0,    12.01, 14.01, 16.00, 18.0,  22.99, 24.31, 28.09, 32.06, 39.10, 40.08, 55.85, 47.9])
-    abund = 10**(np.array([12, 10.93,   8.43,  7.83,  8.69,  7.93,  6.24,  7.60,  7.51,  7.12,  5.03,  6.34,  7.50, 4.95])-12)
-    ionI  =      np.array([13.595,24.58,11.26, 14.53, 13.61, 21.56, 5.14,  7.644, 8.149, 10.357,4.339, 6.111, 7.87, 6.82])
-    ionII  =     np.array([-0.754,  54.403,  24.376,29.593,35.108,40.96, 47.29, 15.03, 16.34, 23.40, 31.81, 11.87, 16.18, 13.57])
+    H++ is actually H-, and the code treats this appropriately as a special case. Need to add vanadium"""
+    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti', 'V']) # Replace these with the abundances from the chosen Abundance Table
+    n_p =        np.array([1,   2,      6,     7,     8,     10,    11,    12,    14,    16,    19,    20,    26,     22,  23])
+    masses=      np.array([1.0, 4.0,    12.01, 14.01, 16.00, 18.0,  22.99, 24.31, 28.09, 32.06, 39.10, 40.08, 55.85, 47.9, 50.94])
+    abund = 10**(np.array([12, 10.93,   8.43,  7.83,  8.69,  7.93,  6.24,  7.60,  7.51,  7.12,  5.03,  6.34,  7.50, 4.95, 3.93])-12)
+    ionI  =      np.array([13.595,24.58,11.26, 14.53, 13.61, 21.56, 5.14,  7.644, 8.149, 10.357,4.339, 6.111, 7.87, 6.82, 6.746])
+    ionII  =     np.array([-0.754,  54.403,  24.376,29.593,35.108,40.96, 47.29, 15.03, 16.34, 23.40, 31.81, 11.87, 16.18, 13.57, 14.634])
 
     #Degeneracy of many of these elements are somewhat temperature-dependent,
     #as it is really a partition function. But as this is mostly H/He plus 
@@ -55,21 +55,32 @@ def solarmet():
     """Return solar metalicity abundances by number and masses for low mass elements.
     From Caffau et al (2011). Masses and ionization energies from NIST."""
     abund_Caffau = read_abund_table("rosseland_opacities/Caffau11/abun.Caffau11.txt", "rosseland_opacities/Caffau11/caffau11.7.02.tron")
-    elt_names = np.array(list(abund_Caffau.atom.keys()), dtype=str)
-    elt_names = np.char.capitalize(elt_names) # Capitalise the first letter to match formatting of the rest of the code
-    n_p = np.array(list(abund_Caffau.atom.values()), dtype=int)
+    abund_Asplund = read_abund_table("rosseland_opacities/Asplund09/abun.Asplund09.txt", "rosseland_opacities/Asplund09/A09photo.7.02.tron")
+
+    names = np.array(list(abund_Caffau.atom.keys()), dtype=str)
+    names = np.char.capitalize(names) # Capitalise the first letter to match formatting of the rest of the code
+
+    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti', 'V'])
+    #get the indexes of these elements in the Caffau table
+    indexes = [np.argwhere(names==elt)[0,0] for elt in elt_names]
+
+    # need to apply those indexes to the arrays below
+    n_p = np.array(list(abund_Caffau.atom.values()), dtype=int)[indexes]
     masses = np.array([1.0, 4.0,  6.94, 9.01, 10.81, 12.01, 14.01, 16.00, 19.00, 20.18, 22.99, 24.31, 26.98, 28.09, 30.97, 
-                       32.06, 35.45, 39.95, 39.10, 40.08, 44.96, 47.9, 50.94, 52.00, 54.94, 55.85, 58.93, 58.69])
-    abund = np.array(list(abund_Caffau.abund.values()), dtype=float)
+                       32.06, 35.45, 39.95, 39.10, 40.08, 44.96, 47.9, 50.94, 52.00, 54.94, 55.85, 58.93, 58.69])[indexes]
+    abund = np.array(list(abund_Caffau.abund.values()), dtype=float)[indexes]
+    # Manually override the V abundance which is not discussed in Caffau et al (2011)
+    abund[-1] = np.array(list(abund_Asplund.abund.values()), dtype=float)[-1]
+    
     # Ionization energies from NIST
     ionI = np.array([13.595, 24.58, 5.391, 9.322, 8.298, 11.26, 14.53, 13.61, 17.42, 21.56, 5.14, 7.644, 5.985, 8.149, 10.486, 10.357, 
-                     12.967, 15.759, 4.339, 6.111, 6.561, 6.82, 6.746, 6.766, 7.434, 7.87, 7.881, 7.639])
+                     12.967, 15.759, 4.339, 6.111, 6.561, 6.82, 6.746, 6.766, 7.434, 7.87, 7.881, 7.639])[indexes]
     ionII  =  np.array([-0.754,  54.403, 75.64, 18.211, 25.154, 24.376,29.593,35.108, 34.970, 40.96, 47.29, 15.03, 18.828, 6.34, 19.769, 
-                        23.40, 23.813, 27.629, 31.81, 11.87, 12.799, 13.57, 14.634, 16.486, 15.64, 16.18, 17.084, 18.168])
+                        23.40, 23.813, 27.629, 31.81, 11.87, 12.799, 13.57, 14.634, 16.486, 15.64, 16.18, 17.084, 18.168])[indexes]
     
-    gI =   np.array([2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,1,10,21,28,7,6,25,28,21]) # Update to match the chosen abundances
-    gII =  np.array([1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,15,28,25,6,7,30,21,10])
-    gIII = np.array([1,1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,10,18,28,25,6,30,28,21])
+    gI =   np.array([2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,1,10,21,28,7,6,25,28,21])[indexes] # Update to match the chosen abundances
+    gII =  np.array([1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,15,28,25,6,7,30,21,10])[indexes]
+    gIII = np.array([1,1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,10,18,28,25,6,30,28,21])[indexes]
     #A lot of these degeneracies are educated guesses! But we're not worried
     #about most elements in the doubly ionized state. 
     
@@ -212,17 +223,17 @@ def equilibrium_solve(rho, T, plot=False):
     #Deplete H, C, O, N, Ti just a little to stop the algorithm getting stuck.
     # Update the indeces to match new abundances
     x0[1] -= 0.4 # H
-    x0[6] -= 0.2 # C
-    x0[7] -= 0.2 # N
-    x0[8] -= 0.4 # O
-    x0[22] -= 0.3 # Ti
+    x0[3] -= 0.2 # C
+    x0[4] -= 0.2 # N
+    x0[5] -= 0.4 # O
+    x0[14] -= 0.3 # Ti
     
     #Also start the most abundant molecules as 0.5 dex less than their limiting constituent
     # Not sure if we need to add more of our molecules?
     x0[-5] = x0[1]-0.5 # H2 limited by H
-    x0[-4] = x0[6]-0.5 # CO limited by C
-    x0[-3] = x0[8]-0.5 # H2O limited by O
-    x0[-2] = x0[8]-0.5 # OH limited by O
+    x0[-4] = x0[3]-0.5 # CO limited by C
+    x0[-3] = x0[5]-0.5 # H2O limited by O
+    x0[-2] = x0[5]-0.5 # OH limited by O
 
 
     #Now solve for the abundances of the molecules!
@@ -826,7 +837,7 @@ def R_T_tables(Rs, Ts, savefile=''):
         for j, T in enumerate(Ts):
             rho_tab[i,j] = R*(T[j].to(u.K).value/1e6)**3
 
-def P_T_equilibrium_tables(P, T, plot=False):
+def P_T_equilibrium_tables(Ps, Ts, plot=False):
     """Compute the partial pressures of all species given a total pressure and temperature.
     Requires P and T to be in linear space and in cgs units.
     
@@ -848,8 +859,8 @@ def P_T_equilibrium_tables(P, T, plot=False):
     natom = len(abund)
     nmol = len(masses_mol)
     
-    #A rough density based on a mean molecular weight of 1.5
-    rhos = (P/(c.k_B*T)*u.u*2.8).to(u.g/u.cm**3)
+    #A rough density based on a mean molecular weight of ~2.8
+    rhos = (Ps/(c.k_B*Ts)*u.u*2.8).to(u.g/u.cm**3)
     logPs = []
     nums = []
     mus = []
