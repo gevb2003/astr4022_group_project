@@ -18,7 +18,7 @@ from opacity_reader import * # Add our table reader
 import warnings
 plt.ion()
 warnings.filterwarnings('ignore', 'The iteration is not making good progress')
-tsuji_K = Table.read('tsuji_K.dat', format='ascii.fixed_width_no_header', \
+tsuji_K = Table.read('tsuji_K_new.dat', format='ascii.fixed_width_no_header', \
  names=('mol', 'c0', 'c1', 'c2','c3','c4','molcode','ediss','comment'), col_starts=(0,7,19,31,43,55,67,80,87))
 # Above is where he imports the molecular data from Tsuji (1973). Will need to update with our exomol abundances
 debroglie_const = (c.h**2/2/np.pi/c.m_e/c.k_B).cgs.value
@@ -74,6 +74,16 @@ def solarmet():
     #about most elements in the doubly ionized state. 
     
     return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names
+
+def molecules():
+    """Return a list of molecules we will consider in the equilibrium calculation.
+    Currently only includes the five we want to consider."""
+    tsuji_K = Table.read('tsuji_K_new.dat', format='ascii.fixed_width_no_header', \
+                        names=('mol', 'c0', 'c1', 'c2','c3','c4','molcode','ediss','comment'), col_starts=(0,7,19,31,43,55,67,80,87))
+    # N2, TiO, TiO2, VO, MgH, CaH, H2, CO, H2O, OH, CN
+    masses =  np.array([14.01*2, 47.9+16.00, 47.9+16.00*2, 50.94+16.00, 24.31+1.0, 40.08+1.0, 1.0*2, 12.01+16.00, 1*2+16.00, 1+16.00, 12.01+14.01])
+
+    return tsuji_K, masses# Will want to update this to our exomol data
 
 def equilibrium_equation(rho, T):
     """Find the components of the chemical equilibrium equation in matrix form.
@@ -166,7 +176,7 @@ def equilibrium_solve(rho, T, plot=False):
     Parameters
     ----------
     rho:  
-         Dimensioned density
+        Dimensioned density
     T:
         Dimensioned temperature
     
@@ -203,16 +213,17 @@ def equilibrium_solve(rho, T, plot=False):
     # Update the indeces to match new abundances
     x0[1] -= 0.4 # H
     x0[6] -= 0.2 # C
-    x0[7] -= 0.2 # O
-    x0[8] -= 0.4 # N
+    x0[7] -= 0.2 # N
+    x0[8] -= 0.4 # O
     x0[22] -= 0.3 # Ti
     
     #Also start the most abundant molecules as 0.5 dex less than their limiting constituent
-    # NEED TO UPDATE THIS
-    x0[-4] = x0[1]-0.5
-    x0[-3] = x0[3]-0.5
-    x0[-2] = x0[5]-0.5
-    x0[-1] = x0[5]-0.5
+    # Not sure if we need to add more of our molecules?
+    x0[-5] = x0[1]-0.5 # H2 limited by H
+    x0[-4] = x0[6]-0.5 # CO limited by C
+    x0[-3] = x0[8]-0.5 # H2O limited by O
+    x0[-2] = x0[8]-0.5 # OH limited by O
+
 
     #Now solve for the abundances of the molecules!
     res = op.root(eq_solve_func, x0, args=(linear_matrix, linear_b, log_matrix, log_b, log_P_ref, abund),method='lm')#, )
@@ -222,7 +233,16 @@ def equilibrium_solve(rho, T, plot=False):
         natom = len(abund)
         nmol = len(tsuji_K['mol']) # Update here as well
         plt.clf()
-        plt.xticks(np.arange(natom + nmol), np.concatenate((elt_names, tsuji_K['mol'].data))) # Update here as well
+        plt.figure(figsize=(10,6))
+        plt.xticks(np.arange(natom + nmol), np.concatenate((elt_names, tsuji_K['mol'].data)))
+        ax = plt.gca()
+        for i, label in enumerate(ax.get_xticklabels()):
+            # alternate vertical offset to zig-zag
+            if i % 2 == 0:
+                label.set_y(0)   # closer to axis
+            else:
+                label.set_y(-0.04)   # a little lower
+
         plt.plot(x0[1:natom+1], 'ro')
         plt.plot(x0[natom+1:], 'go')
         plt.plot([x0[0]], 'rs')
@@ -234,6 +254,8 @@ def equilibrium_solve(rho, T, plot=False):
         if (np.min(res.x) < -20):
             plt.ylim([-25,np.max(res.x)+0.5])
         plt.ylabel(r'log$_{10}$(p) (dyn/cm$^2$)')
+        plt.title('Equilibrium Solve Test')
+        plt.savefig('figures/equilibrium_solve_test.pdf', dpi=300)
     
     #import pdb; pdb.set_trace()
     #test = eq_solve_func(res.x, linear_matrix, linear_b, log_matrix, log_b, log_P_ref, abund)
@@ -713,7 +735,10 @@ def P_T_tables(Ps, Ts, savefile=''):
     cP_tab = np.empty((nP,nT))
     
     #Find the number of atoms and ions
-    n_e, ns, mu, Ui, rho  = ns_from_P_T(Ps[0], Ts[0])
+    n_e, ns, mu, Ui, rho  = ns_from_P_T(Ps[0], Ts[0]) # need to edit ns_from_P_T to take equ solve P inputs????
+    # p_e, p_ion, p_atom, p_mol = equilibrium_solve(Ps[0], Ts[0], plot=False)
+    # n = p /kT
+    # mu = 
     n_species = len(ns)
     
     ns_tab = np.empty((nP,nT,n_species))
@@ -801,7 +826,75 @@ def R_T_tables(Rs, Ts, savefile=''):
         for j, T in enumerate(Ts):
             rho_tab[i,j] = R*(T[j].to(u.K).value/1e6)**3
 
+def P_T_equilibrium_tables(P, T, plot=False):
+    """Compute the partial pressures of all species given a total pressure and temperature.
+    Requires P and T to be in linear space and in cgs units.
+    
+    Returns
+    -------
+    species: array
+        Names of all species (atoms and molecules) in order of returned partial pressures
+    logPs: array
+        Log10 of the partial pressures of all species in dyn/cm**2
+    nums: array
+        Number densities of all species in cm**-3
+    """
+    # Solar elements for names
+    abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names  = solarmet()
+    tsuji_K, masses_mol = molecules()
+    species = np.concatenate((elt_names, tsuji_K['mol'].data))
 
+    # Set up for mu calculation
+    natom = len(abund)
+    nmol = len(masses_mol)
+    
+    #A rough density based on a mean molecular weight of 1.5
+    rhos = (P/(c.k_B*T)*u.u*2.8).to(u.g/u.cm**3)
+    logPs = []
+    nums = []
+    mus = []
+    for rho, T in zip(rhos, Ts):
+        print("Doing temperature: {:.1f}".format(T))
+        pp = equilibrium_solve(rho, T, plot=False)
+        logPs += [pp]
+        plt.pause(.5)
+        
+        ns = ((10**pp)*u.dyne/u.cm**2 /(c.k_B*T)).to(u.cm**(-3)).value
+        nums += [ns]
+
+        electron_ns = ns[0]
+        neutral_ns = ns[1:1+natom]
+        ion_ns = ns[1+natom:-1*(nmol+1)]
+        min_ns = list(np.zeros(natom)) # List to handle H-
+        min_ns[0] = ns[-1] # H-min has it's number density and everything else is zero
+        mol_ns = ns[-1*(nmol+1):-1]
+        species_mu_num = [electron_ns*0.00055]
+        species_mu_denom = [electron_ns]
+        for i in range(natom):
+            species_mu_num += (neutral_ns[i]+ion_ns[i]+min_ns[i])*masses[i]
+            species_mu_denom += (neutral_ns[i]+ion_ns[i]+min_ns[i])
+        for i in range(nmol):
+            species_mu_num += mol_ns[i]*masses_mol[i]
+            species_mu_denom += mol_ns[i]
+        mu = np.sum(species_mu_num)/np.sum(species_mu_denom)
+        mus += [mu]
+
+    logPs = np.array(logPs)
+    nums = np.array(nums)
+    mus = np.array(mus)
+
+    if plot:
+        plt.clf()
+        plt.figure(figsize=(10,6))
+        plt.ticklabel_format(style='plain', axis='y', useOffset=False)
+        plt.plot(Ts, mus, color='magenta')
+        plt.xlabel('Temperature (K)')
+        plt.ylabel('Mean Molecular Weight (amu)')
+        #plt.yscale('log')
+        plt.title('Mean Molecular Weight - Equilibrium Solve Test')
+        plt.savefig('figures/mu_solve_test.pdf', dpi=300)
+    
+    return species, logPs, nums, mus
     
 
 if __name__=='__main__':
@@ -820,6 +913,13 @@ if __name__=='__main__':
             logPs += [equilibrium_solve(rho, T, plot=True)]
             plt.pause(.5)
         logPs = np.array(logPs)
+    
+    if True: #Test new low T equilibrium function
+        Ts = (np.array([1500,1660,1930,2350,3320]))*u.K
+        Pg = np.array([2e3,1e4,1e5,1e6,1e7])*u.dyn/u.cm**2 
+        #A rough density based on a mean molecular weight of 1.5
+
+        species, logPs, nums, mus = P_T_equilibrium_tables(Pg, Ts, plot=True)
    
     #Test 2: Stellar interiors
     if False:
@@ -861,7 +961,7 @@ if __name__=='__main__':
         P_T_tables(Ps, Ts, savefile='rho_Ui_mu_ns_ne_Q_cP_TEST.fits')
 
     # Test 5: Make an equation of state table (NEW VER)
-    if True:
+    if False:
         #
         Ps = np.logspace(-4,6,41)*u.dyn/u.cm**2
         #Ts = (2000 + 500*np.arange(47))*u.K

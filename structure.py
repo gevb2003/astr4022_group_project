@@ -21,28 +21,39 @@ import opac
 from scipy.special import expn
 from strontium_barium import *
 plt.ion()
+from opacity_reader import *
+from astropy.io import fits
+import eos as eos
 
-Teff = 8850 # K #4850 is the lowest. 9000 is the highest that makes sense.
-g = 27400  # cm/s^2
+# === USER INPUT ===
+Teff = 5000 # in units of kelvin # Mike says: 4850 is the lowest. 9000 is the highest that makes sense.
+logg = 1.0
+g = 10**logg * u.cm/u.s**2
 P0 = 10 # Initial pressure in dyn/cm^2
-# Set to 1.3 to limit T due to the onset of convection.
-# If set to 2.0, there is no effect.
-convective_cutoff = 1.3
+convective_cutoff = 1.3 # Limits T due to onset of convection. If 2.0 then there is no cutoff.
+# === END OF INPUT ===
 
-# Load the opacity table for Rosseland mean.
-f_opac = pyfits.open('Ross_Planck_opac.fits')
-kappa_bar_Ross = f_opac['kappa_Ross [cm**2/g]'].data
-#plt.loglog(tau_grid, f_kappa_bar_Ross((np.log10(Ps), Ts)))
 
-# Construct the log(P) and T vectors. 
-h = f_opac[0].header
-T_grid = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
-Ps_log10 = h['CRVAL2'] + np.arange(h['NAXIS2'])*h['CDELT2']
 
-P0 = np.maximum(10**(Ps_log10[0]), P0)  # Ensure P0 is not less than the minimum pressure in the table
+# === Load opacities ===
+T_grid_chi, R_grid_chi, kappa_bar_l = read_opacity_table('rosseland_opacities/Caffau11/caffau11.7.02.tron')
+# RectBivariateSpline requires ascending order. Need to flip T_grid_chi and chi_bar_l.
+T_grid_chi = T_grid_chi[::-1]
+kappa_bar_l = kappa_bar_l[::-1,:] # previously named kappa_bar_ross
+
+# === Construct the log(P) and T vectors ===
+# f_opac = pyfits.open('Ross_Planck_opac.fits')
+#h = f_opac[0].header
+#T_grid = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
+#Ps_log10 = h['CRVAL2'] + np.arange(h['NAXIS2'])*h['CDELT2']
+# === OLD VERSION ===
+
+T_grid = T_grid_chi # log K
+R_grid = R_grid_chi # log (rho/T6^3)
 
 #Create our interpolator functions
-f_kappa_bar_Ross = RegularGridInterpolator((Ps_log10, T_grid), kappa_bar_Ross)
+kappa_bar_l_interp = RectBivariateSpline(T_grid_chi, R_grid_chi, kappa_bar_l)
+#f_kappa_bar_Ross = RegularGridInterpolator((Ps_log10, T_grid), kappa_bar_Ross)
 
 def T_tau(tau, Teff):
 	"""
@@ -53,12 +64,62 @@ def T_tau(tau, Teff):
 	T = (0.75*Teff**4*(tau + q))**.25
 	return T
 
-def dPdtau(_, P, T):
+def mu_from_P_T(P, T):
+    """
+    Given a pressure (in CGS units, value only) and T, return mu from the eos table.
+    For the purpose of solve_ivp, so needs to handle lists/arrays.
+    """
+    if not isinstance(P, u.Quantity):
+        P = [p_cgs * u.dyne / u.cm**2 for p_cgs in P] # Ensure it has units for ns_from_P_T
+
+    mu = [] # Create empty mu list
+    for pressure in P:
+        n_e, n_s, mu_val, Ui, rho = eos.ns_from_P_T(pressure, T) # update this to a better function to use
+        mu.append(mu_val)
+    return mu
+
+def dPdtau_OLD(_, P, T):
 	"""
 	Compute the derivative of pressure with respect to optical depth.
 	"""
-	kappa_bar = f_kappa_bar_Ross((np.log10(P), T))
+	kappa_bar = f_kappa_bar_Ross((P, T))
 	return g / kappa_bar
+
+def get_R(P, T):
+	"""
+	Convert pressure (in CGS units, value only) and T to log R.
+	For the purpose of solve_ivp, so needs to handle lists/arrays.
+	"""
+	if not isinstance(P, u.Quantity):
+		P = [p_cgs * u.dyne / u.cm**2 for p_cgs in P] # Ensure it has units for ns_from_P_T
+
+	R = [] # Create empty R list
+	for pressure in P:
+		n_e, n_s, mu, Ui, rho = eos.ns_from_P_T(pressure, T) # update this to a better function to use
+		R.append(np.log10((rho/(T.to(u.MK)**3)).value))
+	return R
+
+def dPdtau(_, P, T):
+    """
+	Compute the derivative of pressure with respect to optical depth.
+	"""
+    R = get_R(P, T)
+
+    kappa = []
+    for rho in R:
+          kappa_bar = kappa_bar_l_interp(np.log10(T.to(u.K).value), R, grid=False)
+          kappa.append(kappa_bar)
+    return g / kappa
+
+def get_min_P(R, T):
+    """
+    Given a log R and T, return the minimum pressure in the opacity table.
+    """
+    rho = 10**R * (T.to(u.MK)**3).value
+    
+    return P # UNFINISHED
+P0 = np.maximum(10**(Ps_log10[0]), P0)  # Ensure P0 is not less than the minimum pressure in the table
+# NEED TO DEFINE A FUNCTION TO FIND THE ABOVE
 
 # Starting from the lowest value of log(P), integrate P using solve_ivp
 #solve_ivp(fun, t_span, y0, method='RK45', t_eval=None, dense_output=False, events=None, vectorized=False, args=None, **options)
