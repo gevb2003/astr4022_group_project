@@ -13,11 +13,12 @@ from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 import astropy.io.fits as pyfits
 from astropy.table import Table
+from opacity_reader import * # Add our table reader
 #For fsolve - no idea why this happens at high temperatures...
 import warnings
 plt.ion()
 warnings.filterwarnings('ignore', 'The iteration is not making good progress')
-tsuji_K = Table.read('tsuji_K.dat', format='ascii.fixed_width_no_header', \
+tsuji_K = Table.read('tsuji_K_new.dat', format='ascii.fixed_width_no_header', \
  names=('mol', 'c0', 'c1', 'c2','c3','c4','molcode','ediss','comment'), col_starts=(0,7,19,31,43,55,67,80,87))
 # Above is where he imports the molecular data from Tsuji (1973). Will need to update with our exomol abundances
 debroglie_const = (c.h**2/2/np.pi/c.m_e/c.k_B).cgs.value
@@ -25,18 +26,18 @@ eV_Boltzmann_const = (u.eV/c.k_B).cgs.value
 deybe_const = (c.k_B/8/np.pi/c.e.esu**2).cgs.value
 delchi_const = (c.e.esu**2/(1*u.eV)).cgs.value
 
-def solarmet():
+def solarmet_OLD():
     """Return solar metalicity abundances by number and masses for low mass elements.
     From Asplund ete al (2009), up to an abundance of 1e-5 only plus Na, K, Ca. 
-    Degeneracy and ionization energies from IA05 in Scholz code
+    Degeneracy and ionization energies from IA05 in Scholz code. OLD VERSION FROM MIKE
     
-    H++ is actually H-, and the code treats this appropriately as a special case"""
-    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti']) # Replace these with the abundances from the chosen Abundance Table
-    n_p =        np.array([1,   2,      6,     7,     8,     10,    11,    12,    14,    16,    19,    20,    26,     22])
-    masses=      np.array([1.0, 4.0,    12.01, 14.01, 16.00, 18.0,  22.99, 24.31, 28.09, 32.06, 39.10, 40.08, 55.85, 47.9])
-    abund = 10**(np.array([12, 10.93,   8.43,  7.83,  8.69,  7.93,  6.24,  7.60,  7.51,  7.12,  5.03,  6.34,  7.50, 4.95])-12)
-    ionI  =      np.array([13.595,24.58,11.26, 14.53, 13.61, 21.56, 5.14,  7.644, 8.149, 10.357,4.339, 6.111, 7.87, 6.82])
-    ionII  =     np.array([-0.754,  54.403,  24.376,29.593,35.108,40.96, 47.29, 15.03, 16.34, 23.40, 31.81, 11.87, 16.18, 13.57])
+    H++ is actually H-, and the code treats this appropriately as a special case. Need to add vanadium"""
+    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti', 'V']) # Replace these with the abundances from the chosen Abundance Table
+    n_p =        np.array([1,   2,      6,     7,     8,     10,    11,    12,    14,    16,    19,    20,    26,     22,  23])
+    masses=      np.array([1.0, 4.0,    12.01, 14.01, 16.00, 18.0,  22.99, 24.31, 28.09, 32.06, 39.10, 40.08, 55.85, 47.9, 50.94])
+    abund = 10**(np.array([12, 10.93,   8.43,  7.83,  8.69,  7.93,  6.24,  7.60,  7.51,  7.12,  5.03,  6.34,  7.50, 4.95, 3.93])-12)
+    ionI  =      np.array([13.595,24.58,11.26, 14.53, 13.61, 21.56, 5.14,  7.644, 8.149, 10.357,4.339, 6.111, 7.87, 6.82, 6.746])
+    ionII  =     np.array([-0.754,  54.403,  24.376,29.593,35.108,40.96, 47.29, 15.03, 16.34, 23.40, 31.81, 11.87, 16.18, 13.57, 14.634])
 
     #Degeneracy of many of these elements are somewhat temperature-dependent,
     #as it is really a partition function. But as this is mostly H/He plus 
@@ -48,15 +49,59 @@ def solarmet():
     #A lot of these degeneracies are educated guesses! But we're not worried
     #about most elements in the doubly ionized state. 
     gIII = np.array([1,1,1,6,9,9,6,1,1,9,6,1,30,1])
-    return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names
+    return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names # Will want to check that our abundances are in the same form as the above
+
+def solarmet():
+    """Return solar metalicity abundances by number and masses for low mass elements.
+    From Caffau et al (2011). Masses and ionization energies from NIST."""
+    abund_Caffau = read_abund_table("rosseland_opacities/Caffau11/abun.Caffau11.txt", "rosseland_opacities/Caffau11/caffau11.7.02.tron")
+    abund_Asplund = read_abund_table("rosseland_opacities/Asplund09/abun.Asplund09.txt", "rosseland_opacities/Asplund09/A09photo.7.02.tron")
+
+    names = np.array(list(abund_Caffau.atom.keys()), dtype=str)
+    names = np.char.capitalize(names) # Capitalise the first letter to match formatting of the rest of the code
+
+    elt_names = np.array(['H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe',  'Ti', 'V'])
+    #get the indexes of these elements in the Caffau table
+    indexes = [np.argwhere(names==elt)[0,0] for elt in elt_names]
+
+    # need to apply those indexes to the arrays below
+    n_p = np.array(list(abund_Caffau.atom.values()), dtype=int)[indexes]
+    masses = np.array([1.0, 4.0,  6.94, 9.01, 10.81, 12.01, 14.01, 16.00, 19.00, 20.18, 22.99, 24.31, 26.98, 28.09, 30.97, 
+                       32.06, 35.45, 39.95, 39.10, 40.08, 44.96, 47.9, 50.94, 52.00, 54.94, 55.85, 58.93, 58.69])[indexes]
+    abund = np.array(list(abund_Caffau.abund.values()), dtype=float)[indexes]
+    # Manually override the V abundance which is not discussed in Caffau et al (2011)
+    abund[-1] = np.array(list(abund_Asplund.abund.values()), dtype=float)[-1]
     
+    # Ionization energies from NIST
+    ionI = np.array([13.595, 24.58, 5.391, 9.322, 8.298, 11.26, 14.53, 13.61, 17.42, 21.56, 5.14, 7.644, 5.985, 8.149, 10.486, 10.357, 
+                     12.967, 15.759, 4.339, 6.111, 6.561, 6.82, 6.746, 6.766, 7.434, 7.87, 7.881, 7.639])[indexes]
+    ionII  =  np.array([-0.754,  54.403, 75.64, 18.211, 25.154, 24.376,29.593,35.108, 34.970, 40.96, 47.29, 15.03, 18.828, 6.34, 19.769, 
+                        23.40, 23.813, 27.629, 31.81, 11.87, 12.799, 13.57, 14.634, 16.486, 15.64, 16.18, 17.084, 18.168])[indexes]
+    
+    gI =   np.array([2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,1,10,21,28,7,6,25,28,21])[indexes] # Update to match the chosen abundances
+    gII =  np.array([1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,2,15,28,25,6,7,30,21,10])[indexes]
+    gIII = np.array([1,1,2,1,2,1,6,9,4,9,6,1,2,1,6,9,4,9,6,1,10,18,28,25,6,30,28,21])[indexes]
+    #A lot of these degeneracies are educated guesses! But we're not worried
+    #about most elements in the doubly ionized state. 
+    
+    return abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names
+
+def molecules():
+    """Return a list of molecules we will consider in the equilibrium calculation.
+    Currently only includes the five we want to consider."""
+    tsuji_K = Table.read('tsuji_K_new.dat', format='ascii.fixed_width_no_header', \
+                        names=('mol', 'c0', 'c1', 'c2','c3','c4','molcode','ediss','comment'), col_starts=(0,7,19,31,43,55,67,80,87))
+    # N2, TiO, TiO2, VO, MgH, CaH, H2, CO, H2O, OH, CN
+    masses =  np.array([14.01*2, 47.9+16.00, 47.9+16.00*2, 50.94+16.00, 24.31+1.0, 40.08+1.0, 1.0*2, 12.01+16.00, 1*2+16.00, 1+16.00, 12.01+14.01])
+
+    return tsuji_K, masses# Will want to update this to our exomol data
+
 def equilibrium_equation(rho, T):
     """Find the components of the chemical equilibrium equation in matrix form.
     
     There are two parts - linear in partial pressures and logarithmic in 
     partial pressures. 
 
-    Will take the input from the rosseland opacity table which has logT and logR (density?)
     """
     #Input constants and abundances
     abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names = solarmet()
@@ -64,7 +109,7 @@ def equilibrium_equation(rho, T):
     #Find the reference pressure, which is the ideal gas pressure corresponding to
     #atomic Hydrogen only.
     log_P_ref = np.log10( (rho*c.k_B*T/u.u).to(u.dyn/u.cm**2).value )
-    nmol = len(tsuji_K)
+    nmol = len(tsuji_K) # This is our molecule input - replace with ExoMol data
     natom = len(abund)
     
     #The linear matrix, with one equation (row) per atom,  one
@@ -104,11 +149,11 @@ def equilibrium_equation(rho, T):
         log_matrix[i,1+i+natom] = 1
         
     #Next, the molecular part of the equation
-    for i in range(nmol):
+    for i in range(nmol): # Need up to update for our exomol format
         log_matrix[natom + i, 2*natom+1+i] = -1
         mol = tsuji_K[i]
         log_b[natom + i] = mol['c0'] + mol['c1']*th + mol['c2']*th**2 + mol['c3']*th**3 + mol['c4']*th**4
-        for j in range(int(mol['molcode'][0])):
+        for j in range(int(mol['molcode'][0])): # Will need to change these column names to match our exomol data
             atom = int(mol['molcode'][1+j*3:3+j*3])
             natom_in_mol = int(mol['molcode'][3+j*3:4+j*3])
             k = np.argwhere(n_p==atom)[0,0]
@@ -136,11 +181,13 @@ def eq_solve_func(logps, linear_matrix, linear_b, log_matrix, log_b, log_P_ref, 
     
 def equilibrium_solve(rho, T, plot=False):
     """Solve for atomic and molecular equilibrium. 
+
+    This is the function we will use to calculate the pressures for our Rosseland Opacity table.
     
     Parameters
     ----------
     rho:  
-         Dimensioned density
+        Dimensioned density
     T:
         Dimensioned temperature
     
@@ -174,38 +221,52 @@ def equilibrium_solve(rho, T, plot=False):
     x0[len(abund)+1+np.arange(len(abund))] = logp_atom[3*np.arange(len(abund))+1] #ions
     
     #Deplete H, C, O, N, Ti just a little to stop the algorithm getting stuck.
-    x0[1] -= 0.4
-    x0[3] -= 0.2
-    x0[4] -= 0.2
-    x0[5] -= 0.4
-    x0[14] -= 0.3
+    # Update the indeces to match new abundances
+    x0[1] -= 0.4 # H
+    x0[3] -= 0.2 # C
+    x0[4] -= 0.2 # N
+    x0[5] -= 0.4 # O
+    x0[14] -= 0.3 # Ti
     
     #Also start the most abundant molecules as 0.5 dex less than their limiting constituent
-    x0[-4] = x0[1]-0.5
-    x0[-3] = x0[3]-0.5
-    x0[-2] = x0[5]-0.5
-    x0[-1] = x0[5]-0.5
-    
+    # Not sure if we need to add more of our molecules?
+    x0[-5] = x0[1]-0.5 # H2 limited by H
+    x0[-4] = x0[3]-0.5 # CO limited by C
+    x0[-3] = x0[5]-0.5 # H2O limited by O
+    x0[-2] = x0[5]-0.5 # OH limited by O
+
+
     #Now solve for the abundances of the molecules!
     res = op.root(eq_solve_func, x0, args=(linear_matrix, linear_b, log_matrix, log_b, log_P_ref, abund),method='lm')#, )
     
     #For testing, we can make a plot here!
     if plot:
         natom = len(abund)
-        nmol = len(tsuji_K['mol'])
+        nmol = len(tsuji_K['mol']) # Update here as well
         plt.clf()
+        plt.figure(figsize=(10,6))
         plt.xticks(np.arange(natom + nmol), np.concatenate((elt_names, tsuji_K['mol'].data)))
+        ax = plt.gca()
+        for i, label in enumerate(ax.get_xticklabels()):
+            # alternate vertical offset to zig-zag
+            if i % 2 == 0:
+                label.set_y(0)   # closer to axis
+            else:
+                label.set_y(-0.04)   # a little lower
+
         plt.plot(x0[1:natom+1], 'ro')
         plt.plot(x0[natom+1:], 'go')
         plt.plot([x0[0]], 'rs')
         plt.plot(res.x[1:natom+1],'r', label='Neutral solution')
         plt.plot(res.x[natom+1:],'g', label='Ionised solution')
         plt.plot([res.x[0]], 'kx', label='Electron solution')
-        plt.plot([logp_atom[2]], 'ko', label='H-')
+        plt.plot([logp_atom[2]], 'ko', label='H-') # Will want to change this to the actual continuum opacity, TiO
         plt.legend()
         if (np.min(res.x) < -20):
             plt.ylim([-25,np.max(res.x)+0.5])
         plt.ylabel(r'log$_{10}$(p) (dyn/cm$^2$)')
+        plt.title('Equilibrium Solve Test')
+        plt.savefig('figures/equilibrium_solve_test.pdf', dpi=300)
     
     #import pdb; pdb.set_trace()
     #test = eq_solve_func(res.x, linear_matrix, linear_b, log_matrix, log_b, log_P_ref, abund)
@@ -240,7 +301,7 @@ def electron_pressure(n_e, T):
     
 def simplified_eos_rho_T(rho, T, ionised=True):
     """Assume that H and He are ionised. Return the gas pressure for this density and
-    the adiabatic gamma
+    the adiabatic gamma. WE MAY NOT WANT TO USE THIS FOR LOW T VERSION.
     
     Parameters
     ----------
@@ -268,7 +329,8 @@ def simplified_eos_rho_T(rho, T, ionised=True):
     P = ((n_h*np.sum(abund) + n_e)*c.k_B*T).cgs
     
     return P, 5/3, 5/3, 0*u.erg/u.g
-    
+
+# Do we need a new version of the below to include the Saha equation for molecules?
 def saha(n_e, T):
     """Compute the solution to the Saha equation as a function of electron number
     density and temperature, in CGS units. 
@@ -303,7 +365,7 @@ def saha(n_e, T):
     
     #This will break for very low temperatures. In this case, fix a zero  
     #ionization fraction
-    if (T<1000):
+    if (T<1000): # Can keep this as we are optimizing our output for 3000-4000K
         ns = np.zeros(n_elt*3)
         ns[3*np.arange(n_elt)] = abund
         ns = np.maximum(n_e*1e15*ns, 1e-300)
@@ -657,7 +719,7 @@ def rho_s_tables(rhos, ss, savefile=''):
 
 def P_T_tables(Ps, Ts, savefile=''):
     """
-    For an array of densities and specific entropies, create tables of
+    For an array of pressures and temperatures, create tables of
     density (TODO: gammas and entropy).
     
     Pressures are assumed in a logarithmic grid.
@@ -684,7 +746,10 @@ def P_T_tables(Ps, Ts, savefile=''):
     cP_tab = np.empty((nP,nT))
     
     #Find the number of atoms and ions
-    n_e, ns, mu, Ui, rho  = ns_from_P_T(Ps[0], Ts[0])
+    n_e, ns, mu, Ui, rho  = ns_from_P_T(Ps[0], Ts[0]) # need to edit ns_from_P_T to take equ solve P inputs????
+    # p_e, p_ion, p_atom, p_mol = equilibrium_solve(Ps[0], Ts[0], plot=False)
+    # n = p /kT
+    # mu = 
     n_species = len(ns)
     
     ns_tab = np.empty((nP,nT,n_species))
@@ -736,7 +801,112 @@ def P_T_tables(Ps, Ts, savefile=''):
             hdulist = pyfits.HDUList([hdu1, hdu2, hdu3, hdu4, hdu5,hdu6,hdu7])
             hdulist.writeto(savefile, overwrite=True)
     return rho_tab, Ui_tab, mu_tab, ns_tab
+
+def R_T_tables(Rs, Ts, savefile=''):
+    """
+    For an array of density and temperatures, create tables of
+    density (TODO: gammas and entropy). R = rho/(T6)^3
+    
+    Both inputs are in logarithmic grids.
+    
+    Parameters
+    ----------
+    Rs : array
+        input density list.
+    Ts : array
+        input temperature list.
+
+    Returns
+    -------
+    density, pressure, internal energy, number densities tables
+
+    """
+    nR = len(Rs)
+    nT = len(Ts)
+    Rs = 10**Rs
+    Ts = 10**Ts
+    rho_tab = np.empty((nR, nT))
+    P_tab = np.empty((nR, nT))
+    mu_tab = np.empty((nR, nT))
+    Ui_tab = np.empty((nR,nT))
+    Q_tab = np.empty((nR,nT))
+    cP_tab = np.empty((nR,nT))
+    
+    # Create the rho grid from R and T
+    for i, R in enumerate(Rs):
+        for j, T in enumerate(Ts):
+            rho_tab[i,j] = R*(T[j].to(u.K).value/1e6)**3
+
+def P_T_equilibrium_tables(Ps, Ts, plot=False):
+    """Compute the partial pressures of all species given a total pressure and temperature.
+    Requires P and T to be in linear space and in cgs units.
+    
+    Returns
+    -------
+    species: array
+        Names of all species (atoms and molecules) in order of returned partial pressures
+    logPs: array
+        Log10 of the partial pressures of all species in dyn/cm**2
+    nums: array
+        Number densities of all species in cm**-3
+    """
+    # Solar elements for names
+    abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names  = solarmet()
+    tsuji_K, masses_mol = molecules()
+    species = np.concatenate((elt_names, tsuji_K['mol'].data))
+
+    # Set up for mu calculation
+    natom = len(abund)
+    nmol = len(masses_mol)
+    
+    #A rough density based on a mean molecular weight of ~2.8
+    rhos = (Ps/(c.k_B*Ts)*u.u*2.8).to(u.g/u.cm**3)
+    logPs = []
+    nums = []
+    mus = []
+    for rho, T in zip(rhos, Ts):
+        print("Doing temperature: {:.1f}".format(T))
+        pp = equilibrium_solve(rho, T, plot=False)
+        logPs += [pp]
+        plt.pause(.5)
         
+        ns = ((10**pp)*u.dyne/u.cm**2 /(c.k_B*T)).to(u.cm**(-3)).value
+        nums += [ns]
+
+        electron_ns = ns[0]
+        neutral_ns = ns[1:1+natom]
+        ion_ns = ns[1+natom:-1*(nmol+1)]
+        min_ns = list(np.zeros(natom)) # List to handle H-
+        min_ns[0] = ns[-1] # H-min has it's number density and everything else is zero
+        mol_ns = ns[-1*(nmol+1):-1]
+        species_mu_num = [electron_ns*0.00055]
+        species_mu_denom = [electron_ns]
+        for i in range(natom):
+            species_mu_num += (neutral_ns[i]+ion_ns[i]+min_ns[i])*masses[i]
+            species_mu_denom += (neutral_ns[i]+ion_ns[i]+min_ns[i])
+        for i in range(nmol):
+            species_mu_num += mol_ns[i]*masses_mol[i]
+            species_mu_denom += mol_ns[i]
+        mu = np.sum(species_mu_num)/np.sum(species_mu_denom)
+        mus += [mu]
+
+    logPs = np.array(logPs)
+    nums = np.array(nums)
+    mus = np.array(mus)
+
+    if plot:
+        plt.clf()
+        plt.figure(figsize=(10,6))
+        plt.ticklabel_format(style='plain', axis='y', useOffset=False)
+        plt.plot(Ts, mus, color='magenta')
+        plt.xlabel('Temperature (K)')
+        plt.ylabel('Mean Molecular Weight (amu)')
+        #plt.yscale('log')
+        plt.title('Mean Molecular Weight - Equilibrium Solve Test')
+        plt.savefig('figures/mu_solve_test.pdf', dpi=300)
+    
+    return species, logPs, nums, mus
+    
 
 if __name__=='__main__':
 	#Here are a series of simple standalone tests, which you can run if you want!
@@ -754,6 +924,13 @@ if __name__=='__main__':
             logPs += [equilibrium_solve(rho, T, plot=True)]
             plt.pause(.5)
         logPs = np.array(logPs)
+    
+    if True: #Test new low T equilibrium function
+        Ts = (np.array([1500,1660,1930,2350,3320]))*u.K
+        Pg = np.array([2e3,1e4,1e5,1e6,1e7])*u.dyn/u.cm**2 
+        #A rough density based on a mean molecular weight of 1.5
+
+        species, logPs, nums, mus = P_T_equilibrium_tables(Pg, Ts, plot=True)
    
     #Test 2: Stellar interiors
     if False:
@@ -787,11 +964,20 @@ if __name__=='__main__':
         for i in range(len(T_tab)):
             plt.plot(rhos.value, T_tab[i])
             
-    #Test 4: Make an equation of state table
-    if True:
+    #Test 4: Make an equation of state table (OLD VER)
+    if False:
         Ps = np.logspace(-4,6,41)*u.dyn/u.cm**2
-        Ts = (2000 + 500*np.arange(47))*u.K
-        P_T_tables(Ps, Ts, savefile='rho_Ui_mu_ns_ne_Q_cP.fits')
+        #Ts = (2000 + 500*np.arange(47))*u.K
+        Ts = (2000 + 100*np.arange(47))*u.K
+        P_T_tables(Ps, Ts, savefile='rho_Ui_mu_ns_ne_Q_cP_TEST.fits')
+
+    # Test 5: Make an equation of state table (NEW VER)
+    if False:
+        #
+        Ps = np.logspace(-4,6,41)*u.dyn/u.cm**2
+        #Ts = (2000 + 500*np.arange(47))*u.K
+        Ts = (2000 + 100*np.arange(47))*u.K
+        P_T_tables(Ps, Ts, savefile='rho_Ui_mu_ns_ne_Q_cP_TEST.fits')
         
         
         

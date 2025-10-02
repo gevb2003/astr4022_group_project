@@ -18,7 +18,7 @@ Teff = 3000 # in units of kelvin
 logg = 1.0
 
 # toggle for plotting density, pressure and tempeature profiles
-plot_profiles = False
+plot_profiles = True
 
 #-----------------------END OF INPUT-----------------------------
 
@@ -29,7 +29,7 @@ g_cgs = 10**logg * u.cm/u.s**2
 # import functions to read opacity tables from Grace
 from opacity_reader import *
 # Read in solar metallicity file 
-log_T, log_R, opac_table = read_opacity_table('caffau11.7.02.tron')
+log_T, log_R, opac_table = read_opacity_table('rosseland_opacities/Caffau11/caffau11.7.02.tron')
 # Define ranges of T and R 
 Tmin, Tmax = 10**log_T.min(), 10**log_T.max()
 Rmin, Rmax = 10**log_R.min(), 10**log_R.max()

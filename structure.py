@@ -10,7 +10,7 @@
 # - Temperature: K
 # - Frequency: Hz
 
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator, RectBivariateSpline
 from scipy.integrate import solve_ivp, cumulative_trapezoid
 import astropy.units as u
 import astropy.constants as c
@@ -21,28 +21,31 @@ import opac
 from scipy.special import expn
 from strontium_barium import *
 plt.ion()
+from opacity_reader import *
+from astropy.io import fits
+import eos as eos
 
-Teff = 8850 # K #4850 is the lowest. 9000 is the highest that makes sense.
-g = 27400  # cm/s^2
+# === USER INPUT ===
+Teff = 3000 # in units of kelvin # Mike says: 4850 is the lowest. 9000 is the highest that makes sense.
+logg = 1.0
+g = 10**logg * u.cm/u.s**2
 P0 = 10 # Initial pressure in dyn/cm^2
-# Set to 1.3 to limit T due to the onset of convection.
-# If set to 2.0, there is no effect.
-convective_cutoff = 1.3
+convective_cutoff = 1.3 # Limits T due to onset of convection. If 2.0 then there is no cutoff.
+# === END OF INPUT ===
 
-# Load the opacity table for Rosseland mean.
-f_opac = pyfits.open('Ross_Planck_opac.fits')
-kappa_bar_Ross = f_opac['kappa_Ross [cm**2/g]'].data
-#plt.loglog(tau_grid, f_kappa_bar_Ross((np.log10(Ps), Ts)))
 
-# Construct the log(P) and T vectors. 
-h = f_opac[0].header
-T_grid = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
-Ps_log10 = h['CRVAL2'] + np.arange(h['NAXIS2'])*h['CDELT2']
 
-P0 = np.maximum(10**(Ps_log10[0]), P0)  # Ensure P0 is not less than the minimum pressure in the table
+# === Load opacities ===
+T_grid_chi, R_grid_chi, kappa_bar_l = read_opacity_table('rosseland_opacities/Caffau11/caffau11.7.02.tron')
+# RectBivariateSpline requires ascending order. Need to flip T_grid_chi and chi_bar_l.
+T_grid_chi = T_grid_chi[::-1]
+kappa_bar_l = kappa_bar_l[::-1,:] # previously named kappa_bar_ross
+
+T_grid = T_grid_chi # log K - be careful with this!
+R_grid = R_grid_chi # log (rho/T6^3)
 
 #Create our interpolator functions
-f_kappa_bar_Ross = RegularGridInterpolator((Ps_log10, T_grid), kappa_bar_Ross)
+kappa_bar_l_interp = RectBivariateSpline(T_grid, R_grid, kappa_bar_l) # log Kappa
 
 def T_tau(tau, Teff):
 	"""
@@ -53,15 +56,82 @@ def T_tau(tau, Teff):
 	T = (0.75*Teff**4*(tau + q))**.25
 	return T
 
+def mu_from_P_T(P, T):
+    """
+    Given a pressure (in CGS units, value only) and T, return mu from the eos table.
+    For the purpose of solve_ivp, so needs to handle lists/arrays. Requires linear P and T.
+    """
+    P = np.atleast_1d(P)
+    T = np.atleast_1d(T)
+
+    mu = [] # Create empty mu list
+    for pressure in P:
+        if not isinstance(pressure, u.Quantity):
+            pressure = pressure * u.dyne
+        if not isinstance(T, u.Quantity):
+            T = [t_si * u.K for t_si in T]
+        species, logPs, nums, mu_val = eos.P_T_equilibrium_tables(pressure, T, plot=False)
+        mu.append(mu_val)
+    return mu
+
+def get_R(P, T):
+    """
+    Convert pressure (in CGS units, value only) and T to log R.
+    For the purpose of solve_ivp, so needs to handle lists/arrays.
+    Requires linear P and T.
+    """
+
+    R = [] # Create empty R list
+    
+    # Handle arrays or integers
+    P = np.atleast_1d(P)
+    T = np.atleast_1d(T)
+    for pressure, temp in zip(P, T):
+        if not isinstance(pressure, u.Quantity):
+            pressure = pressure * u.dyne / u.cm**2
+        if not isinstance(temp, u.Quantity):
+            temp = temp*u.K
+        mu = mu_from_P_T(pressure, temp)
+        rho = (pressure/c.k_B/temp * u.u * mu).to(u.g/u.cm**3) # Ideal gas law
+        R.append(np.log10((rho/(temp.to(u.MK)**3)).value))
+        print(R)
+
+    return R
+
 def dPdtau(_, P, T):
-	"""
+    """
 	Compute the derivative of pressure with respect to optical depth.
+    Requires linear P and T.
 	"""
-	kappa_bar = f_kappa_bar_Ross((np.log10(P), T))
-	return g / kappa_bar
+    R = get_R(P, T) # log R
+    print(R)
+
+    kappa = []
+    for rho in R:
+          kappa_bar = kappa_bar_l_interp(np.log10(T), R, grid=False)
+          kappa_bar = 10**kappa_bar # Convert from log kappa to kappa
+          kappa.append(kappa_bar)
+    print(kappa)
+    return g / kappa
+
+def get_min_P(R, T):
+    """
+    Given a log R and log T array, return the minimum pressure in the opacity table.
+    """
+    R = np.atleast_1d(R)
+    T = 10**np.atleast_1d(T)
+
+    # Make 2D grids of all (R, T) combinations
+    Rgrid, Tgrid = np.meshgrid(R, T, indexing='ij')
+    T6 = (Tgrid/1e6)
+    rho = (10**Rgrid * T6**3) * (u.g / u.cm**3)
+    P = (rho * c.k_B * Tgrid * u.K/ (u.u * 2.8)).to(u.dyne / u.cm**2) # Assume mu=2.8
+
+    return np.min(P).value
+
+P0 = np.maximum(get_min_P(R_grid,T_grid), P0)  # Ensure P0 is not less than the minimum R/pressure in the table
 
 # Starting from the lowest value of log(P), integrate P using solve_ivp
-#solve_ivp(fun, t_span, y0, method='RK45', t_eval=None, dense_output=False, events=None, vectorized=False, args=None, **options)
 tau_grid = np.concatenate((np.arange(3)/3*1e-3,np.logspace(-3,1.3,30)))
 sol = solve_ivp(dPdtau, [0, 20], [P0], args=(Teff,), t_eval=tau_grid, method='RK45')
 Ps = sol.y[0]
@@ -69,16 +139,13 @@ Ts = T_tau(tau_grid, Teff)
 # Artificially cut the deep layer temperature due to convection.
 Ts = np.minimum(Ts,convective_cutoff*Teff)
 
-# Load the equation of state
-f_eos = pyfits.open('rho_Ui_mu_ns_ne.fits')
-rho = f_eos['rho [g/cm**3]'].data
-
-# Add interpolation functions for whatever isn't already in opac - just rho.
-f_rho = RegularGridInterpolator((Ps_log10, T_grid), rho)
+# Calculate rho values from new Ps and Ts
+mu = mu_from_P_T(Ps, Ts)
+rho = (Ps/(c.k_B*Ts)*u.u*mu).to(u.g/u.cm**3)
 
 # Interpolate onto the tau grid
-kappa_bars = f_kappa_bar_Ross((np.log10(Ps), Ts))
-rhos = f_rho((np.log10(Ps), Ts))    
+kappa_bars = kappa_bar_l_interp(np.log10(Ts.to(u.K).value), get_R(Ps, Ts), grid=False)
+kappa_bars = 10**kappa_bars # Convert from log kappa to  
 
 # First, lets plot a continuum spectrum
 wave = np.linspace(50, 2000, 1000) * u.nm  # Wavelength in nm
