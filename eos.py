@@ -230,7 +230,6 @@ def equilibrium_solve(rho, T, plot=False):
     #x0[15] -= 0.3 # V
     
     #Also start the most abundant molecules as 0.5 dex less than their limiting constituent
-    # Not sure if we need to add more of our molecules?
     x0[-5] = x0[1]-0.5 # H2 limited by H
     x0[-4] = x0[3]-0.5 # CO limited by C
     x0[-3] = x0[5]-0.5 # H2O limited by O
@@ -275,7 +274,8 @@ def equilibrium_solve(rho, T, plot=False):
     if res.success:
         return np.concatenate( (res.x, [logp_atom[2]]))
     else:
-        import pdb; pdb.set_trace()
+        raise ValueError("Equilibrium solve failed")
+        #import pdb; pdb.set_trace()
 
 def ion_mass_g(masses, gI, gII, gIII, max_ionize=2):
     if max_ionize != 2:

@@ -27,7 +27,7 @@ import eos as eos
 import time
 
 # === USER INPUT ===
-Teff = 4000 # in units of kelvin # Mike says: 4850 is the lowest. 9000 is the highest that makes sense.
+Teff = 3300 # in units of kelvin # Mike says: 4850 is the lowest. 9000 is the highest that makes sense.
 logg = 1.0
 g = 10**logg * u.cm/u.s**2
 P0 = 10 # Initial pressure in dyn/cm^2
