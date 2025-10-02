@@ -264,9 +264,9 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
     n_e = ns[0]
     n_H = ns[1]
 
-    key = ['e', 'H', 'He', 'C', 'N', 'O', 'Ne', 'Na', 'Mg', 'Si', 'S', 'K', 'Ca', 'Fe', 'Ti', 
-	   'H+', 'He+', 'C+', 'N+', 'O+', 'Ne+', 'Na+', 'Mg+', 'Si+', 'S+', 'K+', 'Ca+', 'Fe+', 'Ti+',
-	   'NN', 'TiO', 'TiO2', 'MgN', 'CaH', 'HH', 'CO', 'HOH', 'OH', 'H-']
+    key = ['e', 'H', 'He', 'C', 'N', 'O', 'Ne', 'Na', 'Mg', 'Si', 'S', 'K', 'Ca', 'Fe', 'Ti', 'V',
+	   'H+', 'He+', 'C+', 'N+', 'O+', 'Ne+', 'Na+', 'Mg+', 'Si+', 'S+', 'K+', 'Ca+', 'Fe+', 'Ti+', 'V+',
+	   'NN', 'TiO', 'TiO2', 'VO', 'MgN', 'CaH', 'HH', 'CO', 'H2O', 'OH', 'CN', 'H-']
 
     # list names of molecules that have exomol data for 
     molecules = ['TiO', 'VO', 'CN', 'CO', 'H2O']
