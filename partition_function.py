@@ -63,9 +63,9 @@ def read_exomol_states(molecule, states_file):
     if states_file.endswith('.bz2'):
         with bz2.BZ2File(states_file) as f:
             text = f.read().decode()
-        df = pd.read_csv(StringIO(text), delim_whitespace=True, comment="#")
+        df = pd.read_csv(StringIO(text), delim_whitespace=True, comment="#", header=None)
     else:
-        df = pd.read_csv(states_file, delim_whitespace=True, comment="#")
+        df = pd.read_csv(states_file, delim_whitespace=True, comment="#", header=None)
     return df
 
 def get_exomol_trans(molecule, dest='./'):
@@ -81,9 +81,9 @@ def read_exomol_trans(molecule, trans_file):
     if trans_file.endswith('.bz2'):
         with bz2.BZ2File(trans_file) as f:
             text = f.read().decode()
-        df = pd.read_csv(StringIO(text), delim_whitespace=True, comment="#")
+        df = pd.read_csv(StringIO(text), delim_whitespace=True, comment="#", header=None, names=['upper', 'lower', 'A'])
     else:
-        df = pd.read_csv(trans_file, delim_whitespace=True, comment="#")
+        df = pd.read_csv(trans_file, delim_whitespace=True, comment="#", header=None, names=['upper', 'lower', 'A'])
     return df
 
 def read_exomol_pf(molecule):

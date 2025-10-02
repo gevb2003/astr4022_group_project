@@ -208,3 +208,9 @@ __marimo__/
 
 # New git ignore stuff from group project
 check_params.ipynb
+
+# Exomol files
+48Ti-16O__Toto.pf 
+48Ti-16O__Toto.states.bz2
+48Ti-16O__Toto.trans.bz2
+51V-16O__HyVO.pf

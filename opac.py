@@ -7,6 +7,9 @@ import saha_eos as eos
 from scipy.interpolate import RectBivariateSpline
 from scipy.special import voigt_profile
 plt.ion()
+from scipy.interpolate import interp1d
+from partition_function import *
+from eos import equilibrium_solve
 
 """
 This is based on:
@@ -231,6 +234,154 @@ def strong_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
     return kappa
 
 # Will want to write a molecular_line_kappa function. Will need the higher microturbulence parameter as mentioned by Kritika
+
+def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Guassian'):
+    """ For all molecular species, compute the strong line opacities.
+    nu0: Start frequency in Hz
+    dlnu: delta log(nu)
+    N_nu: number of frequencies
+    P: Pressure in dyne/cm^2
+    T: Temperature in K
+    microturb: Microturbulence parameter (default is 5.0 km/s)
+    line_profile: Type of line profile to model. Possible options are Guassian and Voigt
+    """
+
+    #define frequency grid 
+    nu = np.exp(np.linspace(np.log(nu0), np.log(nu0 * np.exp(dlnu * N_nu)), N_nu))
+    # initiate array to hold opacity values as a function of frequency 
+    kappa = np.zeros(N_nu)
+    # highest frequency in range
+    max_nu = nu0 * np.exp(dlnu * (N_nu - 1))
+
+    # get density, assuming ideal gas law. Assuming solar metallicity with mu = 1.3
+    rho = P/(1.3 * c.m_p * c.k_B * T)
+
+    # get pressure of all species
+    Ps = equilibrium_solve(rho, T)
+    #convert to number density in cgs
+    ns = Ps/(c.k_B * T)
+    # extract free electrons and neutral Hydrogen number density for broadening???
+    n_e = ns[0]
+    n_H = ns[1]
+
+    key = ['e', 'H', 'He', 'C', 'N', 'O', 'Ne', 'Na', 'Mg', 'Si', 'S', 'K', 'Ca', 'Fe', 'Ti', 
+	   'H+', 'He+', 'C+', 'N+', 'O+', 'Ne+', 'Na+', 'Mg+', 'Si+', 'S+', 'K+', 'Ca+', 'Fe+', 'Ti+',
+	   'NN', 'TiO', 'TiO2', 'MgN', 'CaH', 'HH', 'CO', 'HOH', 'OH', 'H-']
+
+    # list names of molecules that have exomol data for 
+    molecules = ['TiO', 'VO', 'CN', 'CO', 'H2O']
+
+    # loop through each molecule
+    for name in molecules:
+        
+        # find index of this molecule in the equilibrium_solve function
+        idx_mol = key == name
+
+        # get number density 
+        n = ns[idx_mol]
+
+        # read in exomol data for this molecule
+        # states file
+        states_file_path = get_exomol_states(name)
+        states = read_exomol_states(name, states_file_path)
+
+        # trans file
+        trans_file_path = get_exomol_trans(name)
+        trans = read_exomol_trans(name, trans_file_path)
+
+        # partition function file
+        pf = read_exomol_pf(name)
+
+        # definitions file for the molecular mass
+        def_file = read_exomolweb_def(name)
+        #molecular mass
+        mass_line = next(line for line in def_file if "Isotopologue mass" in line)
+        parts = mass_line.split("#")[0].split()
+        mass = float(parts[0])*u.u
+        # lifetime
+        lifetime_line = next((line for line in def_file if "Lifetime availability" in line), None)
+        lifetime_toggle = lifetime_line.split("#")[0].split()[0]
+
+
+        # get partition function from ExoMol
+        Z_array = pf[1] 
+        Z_temp_array = pf[0]
+
+        # need to build interpolator for Zpart
+        Zpart_interp = interp1d(Z_temp_array, Z_array, kind='linear', fill_value='extrapolate')
+        
+        # Find partition function at the input temperature
+        Zpart = Zpart_interp(T.cgs.value)
+
+        #Compute doppler velocity 
+        doppler_v = np.sqrt(2*(c.k_B* T) / (mass)).to(u.km/u.s).value
+        doppler_dlnu = np.sqrt(doppler_v**2 + microturb**2)/c.c.to(u.km/u.s).value
+
+        # loop over each line for this molecule
+        for i in range(len(trans)):
+            # get line data
+            transition = trans[i]
+
+            # get index of upper and lower states from trans file
+            upper_state_idx = transition[0]
+            lower_state_idx = transition[1]
+            ein_a = transition[2]
+
+            # Find energy of upper and lower levels from the states file (minus 1 because the indexing in the file stats from 1)
+            E_upper = states[states[0] == upper_state_idx][1]*u.cm**-1
+            E_lower = states[states[0] == lower_state_idx][1]*u.cm**-1
+            # calculate frequency of the line in Hz
+            line_nu = (E_upper - E_lower)/(c.h * c.c).to(u.Hz)
+
+            # get degeneracy of the upper level
+            g_upper = states[states[0] == upper_state_idx][2]
+
+            # compute doppler width 
+            doppler_dnu = doppler_dlnu * line_nu
+
+            # compute line opacity 
+            this_kappa = n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/ev_kB_cgs/T)  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
+    
+            # make kappa distribution, line shape depending on the chosen line profile
+            if line_profile == 'Voigt':
+                        # Need to deal with pressure broadening??? 
+                # calculate Gamma for line broadening 
+                # use the life time of the upper state if avaliable
+                if lifetime_toggle == 1:
+                    # extract the lifetime of the upper state 
+                    lifetime = states[5]*u.s
+
+                    # Gamma is the inverse of the lifetime
+                    Gamma = 1/lifetime
+                else:
+                    print("No lifetime data available, using only Doppler broadening")
+                    Gamma = 0*u.s**-1
+
+
+                idx_range = int(0.03/dlnu)
+                # find start and end indices within +/- 3 doppler widths
+                line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                start_idx = np.maximum(line_idx - idx_range, 0)
+                end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
+
+                # make voight profile
+                kappa[start_idx:end_idx] += this_kappa * voigt_profile(nu[start_idx:end_idx] - line_nu, doppler_dnu/np.sqrt(2), Gamma/4/np.pi)
+            elif line_profile == 'Gaussian':
+                
+                # Find start and end indices within 3 sigma
+                idx_range = int(3*doppler_dlnu/dlnu)
+                line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                start_idx = np.maximum(line_idx - idx_range, 0)
+                end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
+
+                # scale gaussian line profile by kappa. 
+                kappa[start_idx:end_idx] += this_kappa * np.exp(-((nu[start_idx:end_idx] - line_nu)/doppler_dnu)**2)/(doppler_dnu * np.sqrt(np.pi))
+            else:
+                raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
+    
+    return kappa
+
+
 
 # Hmin is NOT the dominant opacity in these objects. We may want to create similar functions for TiO and H2O
 def Hmbf(nu, T):
