@@ -24,9 +24,10 @@ plt.ion()
 from opacity_reader import *
 from astropy.io import fits
 import eos as eos
+import time
 
 # === USER INPUT ===
-Teff = 3000 # in units of kelvin # Mike says: 4850 is the lowest. 9000 is the highest that makes sense.
+Teff = 4000 # in units of kelvin # Mike says: 4850 is the lowest. 9000 is the highest that makes sense.
 logg = 1.0
 g = 10**logg * u.cm/u.s**2
 P0 = 10 # Initial pressure in dyn/cm^2
@@ -38,14 +39,17 @@ convective_cutoff = 1.3 # Limits T due to onset of convection. If 2.0 then there
 # === Load opacities ===
 T_grid_chi, R_grid_chi, kappa_bar_l = read_opacity_table('rosseland_opacities/Caffau11/caffau11.7.02.tron')
 # RectBivariateSpline requires ascending order. Need to flip T_grid_chi and chi_bar_l.
-T_grid_chi = T_grid_chi[::-1]
-kappa_bar_l = kappa_bar_l[::-1,:] # previously named kappa_bar_ross
+#T_grid_chi = T_grid_chi[::-1]
+#kappa_bar_l = kappa_bar_l[::-1,:] # previously named kappa_bar_ross
 
 T_grid = T_grid_chi # log K - be careful with this!
 R_grid = R_grid_chi # log (rho/T6^3)
 
 #Create our interpolator functions
-kappa_bar_l_interp = RectBivariateSpline(T_grid, R_grid, kappa_bar_l) # log Kappa
+#kappa_bar_l_interp = RectBivariateSpline(T_grid, R_grid, kappa_bar_l) # log Kappa
+# Transpose kappa to match the order of the grids
+kappa_bar_l = kappa_bar_l.T
+kappa_bar_l_interp = RegularGridInterpolator((R_grid, T_grid), kappa_bar_l) # log Kappa
 
 def T_tau(tau, Teff):
 	"""
@@ -56,22 +60,45 @@ def T_tau(tau, Teff):
 	T = (0.75*Teff**4*(tau + q))**.25
 	return T
 
-def mu_from_P_T(P, T):
+def mu_from_P_T(P, T): 
+    """ Given a pressure (in CGS units, value only) and T, return mu from the eos table. 
+    For the purpose of solve_ivp, so needs to handle lists/arrays. Requires linear P and T. """ 
+    P = np.atleast_1d(P) 
+    T = np.atleast_1d(T) 
+    mu = [] # Create empty mu list 
+    for pressure in P: 
+        if not isinstance(pressure, u.Quantity): 
+            pressure = pressure * u.dyne/u.cm**2 
+        if not isinstance(T, u.Quantity): 
+            T = T * u.K 
+        species, logPs, nums, mu_val = eos.P_T_equilibrium_tables(pressure, T, plot=False, verbose=False) 
+        mu.append(mu_val) 
+    return mu
+
+def mu_from_P_T_pairwise(P, T):
     """
-    Given a pressure (in CGS units, value only) and T, return mu from the eos table.
-    For the purpose of solve_ivp, so needs to handle lists/arrays. Requires linear P and T.
+    Pairwise mu calculation: mu[i] corresponds to P[i], T[i].
+    Returns a numpy array of floats.
     """
     P = np.atleast_1d(P)
     T = np.atleast_1d(T)
 
-    mu = [] # Create empty mu list
-    for pressure in P:
-        if not isinstance(pressure, u.Quantity):
-            pressure = pressure * u.dyne
-        if not isinstance(T, u.Quantity):
-            T = [t_si * u.K for t_si in T]
-        species, logPs, nums, mu_val = eos.P_T_equilibrium_tables(pressure, T, plot=False)
-        mu.append(mu_val)
+    if P.shape != T.shape:
+        raise ValueError("P and T must have the same shape for pairwise evaluation")
+
+    mu = np.empty(P.shape, dtype=float)
+
+    for i, (p_val, t_val) in enumerate(zip(P, T)):
+        # Ensure scalar Quantities
+        if not isinstance(p_val, u.Quantity):
+            p_val = p_val * u.dyne / u.cm**2
+        if not isinstance(t_val, u.Quantity):
+            t_val = t_val * u.K
+
+        # eos function expects arrays of T, but we only want one scalar here
+        _, _, _, mus = eos.P_T_equilibrium_tables(p_val, np.atleast_1d(t_val), plot=False, verbose=False)
+        mu[i] = float(mus[0])  # take scalar value
+
     return mu
 
 def get_R(P, T):
@@ -93,8 +120,8 @@ def get_R(P, T):
             temp = temp*u.K
         mu = mu_from_P_T(pressure, temp)
         rho = (pressure/c.k_B/temp * u.u * mu).to(u.g/u.cm**3) # Ideal gas law
-        R.append(np.log10((rho/(temp.to(u.MK)**3)).value))
-        print(R)
+        R.append(float(np.log10((rho/(temp.to(u.MK)**3)).value)))
+    R = np.array(R)
 
     return R
 
@@ -104,15 +131,14 @@ def dPdtau(_, P, T):
     Requires linear P and T.
 	"""
     R = get_R(P, T) # log R
-    print(R)
 
-    kappa = []
+    kappas = []
     for rho in R:
-          kappa_bar = kappa_bar_l_interp(np.log10(T), R, grid=False)
+          kappa_bar = kappa_bar_l_interp((rho, np.log10(T)))
           kappa_bar = 10**kappa_bar # Convert from log kappa to kappa
-          kappa.append(kappa_bar)
-    print(kappa)
-    return g / kappa
+          kappas.append(float(kappa_bar))
+    kappas = np.array(kappas)
+    return g / kappas
 
 def get_min_P(R, T):
     """
@@ -132,6 +158,8 @@ def get_min_P(R, T):
 P0 = np.maximum(get_min_P(R_grid,T_grid), P0)  # Ensure P0 is not less than the minimum R/pressure in the table
 
 # Starting from the lowest value of log(P), integrate P using solve_ivp
+print('Solving dPdtau')
+start = time.time()
 tau_grid = np.concatenate((np.arange(3)/3*1e-3,np.logspace(-3,1.3,30)))
 sol = solve_ivp(dPdtau, [0, 20], [P0], args=(Teff,), t_eval=tau_grid, method='RK45')
 Ps = sol.y[0]
@@ -140,14 +168,19 @@ Ts = T_tau(tau_grid, Teff)
 Ts = np.minimum(Ts,convective_cutoff*Teff)
 
 # Calculate rho values from new Ps and Ts
-mu = mu_from_P_T(Ps, Ts)
-rho = (Ps/(c.k_B*Ts)*u.u*mu).to(u.g/u.cm**3)
+end = time.time()
+print(f"Equilibrium Elapsed time: {end - start:.3f} seconds")
+print('Calculating rhos')
+mu = mu_from_P_T_pairwise(Ps, Ts)
+rhos = (Ps*u.dyne/u.cm**2 /(c.k_B*Ts*u.K)*u.u*mu).to(u.g/u.cm**3).value
 
 # Interpolate onto the tau grid
-kappa_bars = kappa_bar_l_interp(np.log10(Ts.to(u.K).value), get_R(Ps, Ts), grid=False)
+print('Interpolating kappa bars')
+kappa_bars = kappa_bar_l_interp((get_R(Ps, Ts), np.log10(Ts)))
 kappa_bars = 10**kappa_bars # Convert from log kappa to  
 
 # First, lets plot a continuum spectrum
+print("Begin computing continuum spectrum")
 wave = np.linspace(50, 2000, 1000) * u.nm  # Wavelength in nm
 flux = np.zeros_like(wave)  # Initialize flux array
 
@@ -224,8 +257,10 @@ H_all = np.convolve(H_all, g_macro/np.sum(g_macro), mode='same')
 #Plot this
 plt.figure(2)
 plt.clf()
-plt.plot(wave_nm, 4*np.pi*H_all / 1e6, label='Flux')
+plt.plot(wave_nm, 4*np.pi*H_all / 1e6, label='Flux (No Molecular Lines)')
+plt.title(f'M-giant Spectra Test: {Teff} K, logg={logg}, v_macro={macroturb} km/s')
 plt.xlabel('Wavelength (nm)')
 plt.ylabel(r'Flux (W/m$^2$/$\mu$m)')
 plt.legend()
+plt.savefig(f'figures/spectrum_test_T{Teff}_no_mol_lines.pdf', dpi=300)
 plt.show()

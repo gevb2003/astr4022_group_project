@@ -220,13 +220,14 @@ def equilibrium_solve(rho, T, plot=False):
     x0[1+np.arange(len(abund))] = logp_atom[3*np.arange(len(abund))] #neutrals
     x0[len(abund)+1+np.arange(len(abund))] = logp_atom[3*np.arange(len(abund))+1] #ions
     
-    #Deplete H, C, O, N, Ti just a little to stop the algorithm getting stuck.
+    #Deplete H, C, O, N, Ti, V just a little to stop the algorithm getting stuck.
     # Update the indeces to match new abundances
     x0[1] -= 0.4 # H
     x0[3] -= 0.2 # C
     x0[4] -= 0.2 # N
     x0[5] -= 0.4 # O
     x0[14] -= 0.3 # Ti
+    #x0[15] -= 0.3 # V
     
     #Also start the most abundant molecules as 0.5 dex less than their limiting constituent
     # Not sure if we need to add more of our molecules?
@@ -234,6 +235,7 @@ def equilibrium_solve(rho, T, plot=False):
     x0[-4] = x0[3]-0.5 # CO limited by C
     x0[-3] = x0[5]-0.5 # H2O limited by O
     x0[-2] = x0[5]-0.5 # OH limited by O
+    #x0[-9] = x0[5]-0.5 # VO limited by O
 
 
     #Now solve for the abundances of the molecules!
@@ -837,7 +839,7 @@ def R_T_tables(Rs, Ts, savefile=''):
         for j, T in enumerate(Ts):
             rho_tab[i,j] = R*(T[j].to(u.K).value/1e6)**3
 
-def P_T_equilibrium_tables(Ps, Ts, plot=False):
+def P_T_equilibrium_tables(Ps, Ts, plot=False, verbose=True):
     """Compute the partial pressures of all species given a total pressure and temperature.
     Requires P and T to be in linear space and in cgs units.
     
@@ -865,7 +867,8 @@ def P_T_equilibrium_tables(Ps, Ts, plot=False):
     nums = []
     mus = []
     for rho, T in zip(rhos, Ts):
-        print("Doing temperature: {:.1f}".format(T))
+        if verbose:
+            print("Doing temperature: {:.1f}".format(T))
         pp = equilibrium_solve(rho, T, plot=False)
         logPs += [pp]
         plt.pause(.5)
