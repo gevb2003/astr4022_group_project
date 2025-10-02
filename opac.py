@@ -253,8 +253,10 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
     # highest frequency in range
     max_nu = nu0 * np.exp(dlnu * (N_nu - 1))
 
-    # get density, assuming ideal gas law. Assuming solar metallicity with mu = 1.3
-    rho = P/(1.3 * c.m_p * c.k_B * T)
+    # get density, assuming ideal gas law. Assuming solar metallicity with mu = 2.8
+    T = T*u.K
+    P = P*u.dyne/u.cm**2
+    rho = (P /(c.k_B * T) * 2.8 * u.u).to(u.g/u.cm**3)
 
     # get pressure of all species
     Ps = equilibrium_solve(rho, T)

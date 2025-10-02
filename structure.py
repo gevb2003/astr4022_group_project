@@ -27,7 +27,7 @@ import eos as eos
 import time
 
 # === USER INPUT ===
-Teff = 3300 # in units of kelvin # Mike says: 4850 is the lowest. 9000 is the highest that makes sense.
+Teff = 3700 # in units of kelvin. Minimum 3300 K
 logg = 1.0
 g = 10**logg * u.cm/u.s**2
 P0 = 10 # Initial pressure in dyn/cm^2
@@ -228,9 +228,10 @@ plt.show()
 
 # Now lets add in all lines. The Strontium line calculation is saved under "week34" if you
 # want to look at that.
-nu0 = 3e8/700e-9
-dlnu = 5e-6
-Nnu = 200000
+wavemax = 900e-9 # nm
+nu0 = 3e8/wavemax
+dlnu = 7e-6
+Nnu = 300000
 print("Computing line opacities")
 
 # Compute the frequency grid
@@ -240,7 +241,7 @@ kappa_all_nu_bars = np.empty((Nnu, len(tau_grid)))
 for i, (T, P, rho) in enumerate(zip(Ts, Ps, rhos)):
     kappa_all_nu_bars[:,i] = opac.kappa_cont(nu, np.log10(P), T) + \
         opac.weak_line_kappa(nu0, dlnu, Nnu, np.log10(P), T) + \
-        opac.strong_line_kappa(nu0, dlnu, Nnu, np.log10(P), T)
+        opac.strong_line_kappa(nu0, dlnu, Nnu, np.log10(P), T) + opac.molecular_line_kappa(nu0, dlnu, Nnu, P, T)
     kappa_all_nu_bars[:,i] /= rho
 
 print("Computing Line Spectrum")
@@ -255,7 +256,7 @@ g_macro = np.exp(-(np.arange(-int(2.5*width), int(2.5*width)+1)**2)/width**2)
 H_all = np.convolve(H_all, g_macro/np.sum(g_macro), mode='same')
 
 #Plot this
-plt.figure(2)
+plt.figure(2, figsize=(10,6))
 plt.clf()
 plt.plot(wave_nm, 4*np.pi*H_all / 1e6, label='Flux (No Molecular Lines)')
 plt.title(f'M-giant Spectra Test: {Teff} K, logg={logg}, v_macro={macroturb} km/s')
