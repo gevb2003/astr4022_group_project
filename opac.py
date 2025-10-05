@@ -236,7 +236,7 @@ def strong_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
 
 # Will want to write a molecular_line_kappa function. Will need the higher microturbulence parameter as mentioned by Kritika
 
-def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Guassian'):
+def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gaussian'):
     """ For all molecular species, compute the strong line opacities.
     nu0: Start frequency in Hz
     dlnu: delta log(nu)
@@ -283,7 +283,6 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
         n = ns[idx_mol]
 
         # read in exomol data for this molecule
-
         # Create folder to hold exomol data if not there already
         os.makedirs('exomol_data', exist_ok=True)
 
@@ -295,7 +294,7 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
         mass = float(parts[0])*u.u
 
         #Compute doppler velocity 
-        doppler_v = np.sqrt(2*(c.k_B* T*u.K) / (mass)).to(u.km/u.s).value
+        doppler_v = np.sqrt(2*(c.k_B* T) / (mass)).to(u.km/u.s).value
         doppler_dlnu = np.sqrt(doppler_v**2 + microturb**2)/c.c.to(u.km/u.s).value
 
         # lifetime
@@ -327,6 +326,18 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
             # extract trans file 
             trans = read_exomol_trans(file_path)
 
+            # Convert states DataFrame into Series for fast lookup
+            state_energy = states.set_index(0)[1]
+
+            # Compute line frequencies
+            k_upper = state_energy.loc[trans['upper']].to_numpy() * u.cm**-1
+            k_lower = state_energy.loc[trans['lower']].to_numpy() * u.cm**-1
+            line_nu = (c.c / (2 * np.pi) * (k_upper - k_lower)).to(u.Hz)
+
+            # Filter by frequency range
+            mask = (line_nu.value >= nu0) & (line_nu.value <= max_nu)
+            trans = trans[mask]
+
             # loop over each trasition in this file
             for row in trans.itertuples(index=False):
             
@@ -335,11 +346,14 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
                 lower_state_idx = row.lower
                 ein_a = row.A
 
-                # Find energy of upper and lower levels from the states file (minus 1 because the indexing in the file stats from 1)
-                E_upper = states[states[0] == upper_state_idx][1]*u.cm**-1
-                E_lower = states[states[0] == lower_state_idx][1]*u.cm**-1
+                # Find wavenumber of upper and lower states
+                k_upper = states[states[0] == upper_state_idx][1].iloc[0]*u.cm**-1
+                k_lower = states[states[0] == lower_state_idx][1].iloc[0]*u.cm**-1
                 # calculate frequency of the line in Hz
-                line_nu = (E_upper - E_lower)/(c.h * c.c).to(u.Hz)
+                line_nu = (c.c/(2*np.pi) * (k_upper - k_lower)).to(u.Hz)
+
+                # convert wavenumber to energy of the lower state 
+                E_lower = c.h*c.c/(2*np.pi) * k_lower
 
                 # get degeneracy of the upper level
                 g_upper = states[states[0] == upper_state_idx][2].iloc[0]
@@ -348,7 +362,7 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
                 doppler_dnu = doppler_dlnu * line_nu
 
                 # compute line opacity 
-                this_kappa = n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/ev_kB_cgs/T)  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
+                this_kappa = n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/(c.k_B *T))  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
         
                 # make kappa distribution, line shape depending on the chosen line profile
                 if line_profile == 'Voigt':
@@ -368,7 +382,7 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
 
                     idx_range = int(0.03/dlnu)
                     # find start and end indices within +/- 3 doppler widths
-                    line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                    line_idx = int((np.log(line_nu.value) - np.log(nu0))/dlnu)
                     start_idx = np.maximum(line_idx - idx_range, 0)
                     end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
 
