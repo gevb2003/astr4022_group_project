@@ -10,6 +10,7 @@ plt.ion()
 from scipy.interpolate import interp1d
 from partition_function import *
 from eos import equilibrium_solve
+import os 
 
 """
 This is based on:
@@ -262,124 +263,129 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gua
     Ps = equilibrium_solve(rho, T)
     #convert to number density in cgs
     ns = Ps/(c.k_B * T)
-    # extract free electrons and neutral Hydrogen number density for broadening???
-    n_e = ns[0]
-    n_H = ns[1]
 
     key = ['e', 'H', 'He', 'C', 'N', 'O', 'Ne', 'Na', 'Mg', 'Si', 'S', 'K', 'Ca', 'Fe', 'Ti', 'V',
 	   'H+', 'He+', 'C+', 'N+', 'O+', 'Ne+', 'Na+', 'Mg+', 'Si+', 'S+', 'K+', 'Ca+', 'Fe+', 'Ti+', 'V+',
 	   'NN', 'TiO', 'TiO2', 'VO', 'MgN', 'CaH', 'HH', 'CO', 'H2O', 'OH', 'CN', 'H-']
 
     # list names of molecules that have exomol data for 
-    molecules = ['TiO', 'VO', 'CN', 'CO', 'H2O']
+    #molecules = ['TiO', 'VO', 'CN', 'CO', 'H2O']
+    # Testing just with TiO
+    molecules = ['TiO']
 
     # loop through each molecule
     for name in molecules:
         
         # find index of this molecule in the equilibrium_solve function
-        idx_mol = key == name
+        idx_mol = key.index(name)
 
         # get number density 
         n = ns[idx_mol]
 
         # read in exomol data for this molecule
-        # states file
-        states_file_path = get_exomol_states(name)
-        states = read_exomol_states(name, states_file_path)
 
-        # trans file
-        trans_file_path = get_exomol_trans(name)
-        trans = read_exomol_trans(name, trans_file_path)
+        # Create folder to hold exomol data if not there already
+        os.makedirs('exomol_data', exist_ok=True)
 
-        # partition function file
-        pf = read_exomol_pf(name)
-
-        # definitions file for the molecular mass
-        def_file = read_exomolweb_def(name)
+        # definitions file 
+        def_file = read_exomolweb_def(name, dest='exomol_data')
         #molecular mass
         mass_line = next(line for line in def_file if "Isotopologue mass" in line)
         parts = mass_line.split("#")[0].split()
         mass = float(parts[0])*u.u
+
+        #Compute doppler velocity 
+        doppler_v = np.sqrt(2*(c.k_B* T*u.K) / (mass)).to(u.km/u.s).value
+        doppler_dlnu = np.sqrt(doppler_v**2 + microturb**2)/c.c.to(u.km/u.s).value
+
         # lifetime
         lifetime_line = next((line for line in def_file if "Lifetime availability" in line), None)
         lifetime_toggle = lifetime_line.split("#")[0].split()[0]
 
-
-        # get partition function from ExoMol
-        Z_array = pf[1] 
-        Z_temp_array = pf[0]
+        # partition function file
+        pf = read_exomol_pf(name, dest='exomol_data')
+        Z_array = pf['Q'] 
+        Z_temp_array = pf['T']
 
         # need to build interpolator for Zpart
         Zpart_interp = interp1d(Z_temp_array, Z_array, kind='linear', fill_value='extrapolate')
-        
         # Find partition function at the input temperature
         Zpart = Zpart_interp(T.cgs.value)
+        
+        # states file
+        states_file_path = get_exomol_states(name, dest='exomol_data')
+        states = read_exomol_states(states_file_path)
 
-        #Compute doppler velocity 
-        doppler_v = np.sqrt(2*(c.k_B* T) / (mass)).to(u.km/u.s).value
-        doppler_dlnu = np.sqrt(doppler_v**2 + microturb**2)/c.c.to(u.km/u.s).value
+        # trans file
+        # find range of wavenumber 
+        E_min = (2*np.pi/c.c * nu0*u.Hz).to(u.cm**-1).value
+        E_max = (2*np.pi/c.c * max_nu*u.Hz).to(u.cm**-1).value
+        # get trans file(s)
+        trans_file_paths = get_exomol_trans(name, E_min, E_max, dest='exomol_data')
+        # loop over different trans files (VO and H2O)
+        for file_path in trans_file_paths:
+            # extract trans file 
+            trans = read_exomol_trans(file_path)
 
-        # loop over each line for this molecule
-        for i in range(len(trans)):
-            # get line data
-            transition = trans[i]
+            # loop over each trasition in this file
+            for row in trans.itertuples(index=False):
+            
+                # get index of upper and lower states and einstein A from trans file
+                upper_state_idx = row.upper
+                lower_state_idx = row.lower
+                ein_a = row.A
 
-            # get index of upper and lower states from trans file
-            upper_state_idx = transition[0]
-            lower_state_idx = transition[1]
-            ein_a = transition[2]
+                # Find energy of upper and lower levels from the states file (minus 1 because the indexing in the file stats from 1)
+                E_upper = states[states[0] == upper_state_idx][1]*u.cm**-1
+                E_lower = states[states[0] == lower_state_idx][1]*u.cm**-1
+                # calculate frequency of the line in Hz
+                line_nu = (E_upper - E_lower)/(c.h * c.c).to(u.Hz)
 
-            # Find energy of upper and lower levels from the states file (minus 1 because the indexing in the file stats from 1)
-            E_upper = states[states[0] == upper_state_idx][1]*u.cm**-1
-            E_lower = states[states[0] == lower_state_idx][1]*u.cm**-1
-            # calculate frequency of the line in Hz
-            line_nu = (E_upper - E_lower)/(c.h * c.c).to(u.Hz)
+                # get degeneracy of the upper level
+                g_upper = states[states[0] == upper_state_idx][2].iloc[0]
 
-            # get degeneracy of the upper level
-            g_upper = states[states[0] == upper_state_idx][2]
+                # compute doppler width 
+                doppler_dnu = doppler_dlnu * line_nu
 
-            # compute doppler width 
-            doppler_dnu = doppler_dlnu * line_nu
+                # compute line opacity 
+                this_kappa = n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/ev_kB_cgs/T)  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
+        
+                # make kappa distribution, line shape depending on the chosen line profile
+                if line_profile == 'Voigt':
+                            # Need to deal with pressure broadening??? 
+                    # calculate Gamma for line broadening 
+                    # use the life time of the upper state if avaliable
+                    if lifetime_toggle == 1:
+                        # extract the lifetime of the upper state 
+                        lifetime = states[5]*u.s
 
-            # compute line opacity 
-            this_kappa = n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/ev_kB_cgs/T)  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
-    
-            # make kappa distribution, line shape depending on the chosen line profile
-            if line_profile == 'Voigt':
-                        # Need to deal with pressure broadening??? 
-                # calculate Gamma for line broadening 
-                # use the life time of the upper state if avaliable
-                if lifetime_toggle == 1:
-                    # extract the lifetime of the upper state 
-                    lifetime = states[5]*u.s
+                        # Gamma is the inverse of the lifetime
+                        Gamma = 1/lifetime
+                    else:
+                        print("No lifetime data available, using only Doppler broadening")
+                        Gamma = 0*u.s**-1
 
-                    # Gamma is the inverse of the lifetime
-                    Gamma = 1/lifetime
+
+                    idx_range = int(0.03/dlnu)
+                    # find start and end indices within +/- 3 doppler widths
+                    line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                    start_idx = np.maximum(line_idx - idx_range, 0)
+                    end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
+
+                    # make voight profile
+                    kappa[start_idx:end_idx] += this_kappa * voigt_profile(nu[start_idx:end_idx] - line_nu, doppler_dnu/np.sqrt(2), Gamma/4/np.pi)
+                elif line_profile == 'Gaussian':
+                    
+                    # Find start and end indices within 3 sigma
+                    idx_range = int(3*doppler_dlnu/dlnu)
+                    line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                    start_idx = np.maximum(line_idx - idx_range, 0)
+                    end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
+
+                    # scale gaussian line profile by kappa. 
+                    kappa[start_idx:end_idx] += this_kappa * np.exp(-((nu[start_idx:end_idx] - line_nu)/doppler_dnu)**2)/(doppler_dnu * np.sqrt(np.pi))
                 else:
-                    print("No lifetime data available, using only Doppler broadening")
-                    Gamma = 0*u.s**-1
-
-
-                idx_range = int(0.03/dlnu)
-                # find start and end indices within +/- 3 doppler widths
-                line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
-                start_idx = np.maximum(line_idx - idx_range, 0)
-                end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
-
-                # make voight profile
-                kappa[start_idx:end_idx] += this_kappa * voigt_profile(nu[start_idx:end_idx] - line_nu, doppler_dnu/np.sqrt(2), Gamma/4/np.pi)
-            elif line_profile == 'Gaussian':
-                
-                # Find start and end indices within 3 sigma
-                idx_range = int(3*doppler_dlnu/dlnu)
-                line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
-                start_idx = np.maximum(line_idx - idx_range, 0)
-                end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
-
-                # scale gaussian line profile by kappa. 
-                kappa[start_idx:end_idx] += this_kappa * np.exp(-((nu[start_idx:end_idx] - line_nu)/doppler_dnu)**2)/(doppler_dnu * np.sqrt(np.pi))
-            else:
-                raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
+                    raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
     
     return kappa
 
