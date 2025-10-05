@@ -214,3 +214,6 @@ check_params.ipynb
 48Ti-16O__Toto.states.bz2
 48Ti-16O__Toto.trans.bz2
 51V-16O__HyVO.pf
+
+# Directory to store exomol data
+exomol_data/

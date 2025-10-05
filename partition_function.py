@@ -50,29 +50,59 @@ MOLECULE_URLS = {
     }
 }
 
-def read_exomolweb_def(molecule):
+def read_exomolweb_def(molecule, dest='./'):
+    # url of file to be downloaded
     def_url = MOLECULE_URLS[molecule]['def']
-    resp = requests.get(def_url)
-    resp.raise_for_status()
-    return resp.text.splitlines()
+    # file path of location of file once downloaded
+    file_path = os.path.join(dest, os.path.basename(def_url))
+
+    #check if file already exists
+    if not os.path.exists(file_path):
+        print(f"Downloading {file_path} ...")
+        # download in chunks
+        with requests.get(def_url, stream=True, timeout=120) as resp:
+            resp.raise_for_status()
+            with open(file_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        print(f"Download complete: {file_path}")
+    else:
+        print(f"File already exists: {file_path}")
+    # Read the file 
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return f.read().splitlines()
 
 def get_exomol_states(molecule, dest='./'):
+    # url of file to be downloaded
     url = MOLECULE_URLS[molecule]['states']
+    # file path of once downloaded
     file_path = os.path.join(dest, os.path.basename(url))
-    resp = requests.get(url)
-    resp.raise_for_status()
-    with open(file_path, 'wb') as f:
-        f.write(resp.content)
+
+    #check if file already exists
+    if not os.path.exists(file_path):
+        print(f"Downloading {file_path} ...")
+        # download in chunks
+        with requests.get(url, stream=True, timeout=120) as resp:
+            resp.raise_for_status()
+            with open(file_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        print(f"Download complete: {file_path}")
+    else:
+        print(f"File already exists: {file_path}")
+
     return file_path
 
-def read_exomol_states(molecule, states_file):
+def read_exomol_states(states_file):
     # If file is bz2, decompress to memory
     if states_file.endswith('.bz2'):
         with bz2.BZ2File(states_file) as f:
             text = f.read().decode()
-        df = pd.read_csv(StringIO(text), delim_whitespace=True, comment="#", header=None)
+        df = pd.read_csv(StringIO(text), sep=r'\s+', comment="#", header=None)
     else:
-        df = pd.read_csv(states_file, delim_whitespace=True, comment="#", header=None)
+        df = pd.read_csv(states_file, sep=r'\s+', comment="#", header=None)
     return df
 
 
@@ -88,15 +118,22 @@ def get_exomol_trans(molecule, E_min, E_max, dest='./'):
         for i in range(len(splits) - 1):
             trans_url = f'{url_base}1H2-16O__POKAZATEL__{splits[i]}-{splits[i+1]}.trans.bz2'
             file_path = os.path.join(dest, os.path.basename(trans_url))
-            print(f"Downloading {os.path.basename(file_path)} ...")
 
-            # stream download
-            with requests.get(trans_url, stream=True, timeout=120) as resp:
-                resp.raise_for_status()
-                with open(file_path, 'wb') as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
+            # Check if the file is already downloaded 
+            if not os.path.exists(file_path):
+                print(f"Downloading {os.path.basename(file_path)} ...")
+
+                # stream download
+                with requests.get(trans_url, stream=True, timeout=120) as resp:
+                    resp.raise_for_status()
+                    with open(file_path, 'wb') as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                print(f"Download complete: {file_path}")
+            else: 
+                print(f"File already exists: {file_path}")
+            
             downloaded_files.append(file_path)
 
     elif molecule == 'VO':
@@ -107,45 +144,75 @@ def get_exomol_trans(molecule, E_min, E_max, dest='./'):
         for i in range(len(splits) - 1):
             trans_url = f'{url_base}51V-16O__HyVO__{splits[i]}-{splits[i+1]}.trans.bz2'
             file_path = os.path.join(dest, os.path.basename(trans_url))
-            print(f"Downloading {os.path.basename(file_path)} ...")
 
-            with requests.get(trans_url, stream=True, timeout=120) as resp:
+            # Check if the file is already downloaded 
+            if not os.path.exists(file_path):
+                print(f"Downloading {os.path.basename(file_path)} ...")
+
+                with requests.get(trans_url, stream=True, timeout=120) as resp:
+                    resp.raise_for_status()
+                    with open(file_path, 'wb') as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                print(f"Download complete: {file_path}")
+            else: 
+                print(f"File already exists: {file_path}")
+
+            downloaded_files.append(file_path)
+
+    else:
+        file_path = os.path.join(dest, os.path.basename(url_base))
+
+        # Check if the file is already downloaded 
+        if not os.path.exists(file_path):
+            print(f"Downloading {os.path.basename(file_path)} ...")
+            with requests.get(url_base, stream=True, timeout=120) as resp:
                 resp.raise_for_status()
                 with open(file_path, 'wb') as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
-            downloaded_files.append(file_path)
-
-    else:
-        file_path = os.path.join(dest, os.path.basename(url_base))
-        print(f"Downloading {os.path.basename(file_path)} ...")
-        with requests.get(url_base, stream=True, timeout=120) as resp:
-            resp.raise_for_status()
-            with open(file_path, 'wb') as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+            print(f"Download complete: {file_path}")
+        else: 
+            print(f"File already exists: {file_path}")
         downloaded_files.append(file_path)
 
     print("Download complete.")
     return downloaded_files
 
-def read_exomol_trans(molecule, trans_file):
+def read_exomol_trans(trans_file):
     if trans_file.endswith('.bz2'):
         with bz2.BZ2File(trans_file) as f:
             text = f.read().decode()
-        df = pd.read_csv(StringIO(text), delim_whitespace=True, comment="#", header=None, names=['upper', 'lower', 'A'])
+        df = pd.read_csv(StringIO(text), sep=r'\s+', comment="#", header=None, names=['upper', 'lower', 'A'])
     else:
-        df = pd.read_csv(trans_file, delim_whitespace=True, comment="#", header=None, names=['upper', 'lower', 'A'])
+        df = pd.read_csv(trans_file, sep=r'\s+', comment="#", header=None, names=['upper', 'lower', 'A'])
     return df
 
-def read_exomol_pf(molecule):
+def read_exomol_pf(molecule, dest='./'):
     url = MOLECULE_URLS[molecule]['pf']
-    resp = requests.get(url)
-    resp.raise_for_status()
-    # Example .pf files are generally whitespace separated with two columns: T, Q(T)
-    return pd.read_csv(StringIO(resp.text), delim_whitespace=True, comment="#", header=None, names=['T', 'Q'])
+
+    #define where file will be saved
+    file_path = os.path.join(dest, os.path.basename(url))
+
+    # Check is file is already downloaded
+    if not os.path.exists(file_path):
+        # download file in chunks 
+        print(f"Downloading {os.path.basename(file_path)} ...")
+        with requests.get(url, stream=True, timeout=120) as resp:
+            resp.raise_for_status()
+            with open(file_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+    else:
+        print(f"File already exists: {file_path}")
+    # Create data frame from pf file
+    with open(file_path, 'r') as f:
+        pf_table = pd.read_csv(f, sep=r'\s+', comment="#", header=None, names=['T', 'Q'])
+
+    return pf_table
 
 def read_exomol_broad(molecule, broadner):
     # TiO, VO, CN, CO, H2O -- broadening file URL needs broadener name
@@ -160,7 +227,7 @@ def read_exomol_broad(molecule, broadner):
     elif molecule == 'H2O':
         broad_url = f'https://www.exomol.com/db/H2O/H2-16O/H2-16O__{broadner}.broad'
     else:
-        raise ValueError('Molecule not recognized. Please choose from TiO, VO, CN, CO, H2O.')
+        raise ValueError('Molecule not recognised. Please choose from TiO, VO, CN, CO, H2O.')
     resp = requests.get(broad_url)
     resp.raise_for_status()
     return resp.text.splitlines()
