@@ -260,9 +260,10 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
     rho = (P /(c.k_B * T) * 2.8 * u.u).to(u.g/u.cm**3)
 
     # get pressure of all species
-    Ps = equilibrium_solve(rho, T)
+    logPs = equilibrium_solve(rho, T)
+    Ps = 10**logPs * u.dyne/u.cm**2
     #convert to number density in cgs
-    ns = Ps/(c.k_B * T)
+    ns = (Ps/(c.k_B * T)).cgs
 
     key = ['e', 'H', 'He', 'C', 'N', 'O', 'Ne', 'Na', 'Mg', 'Si', 'S', 'K', 'Ca', 'Fe', 'Ti', 'V',
 	   'H+', 'He+', 'C+', 'N+', 'O+', 'Ne+', 'Na+', 'Mg+', 'Si+', 'S+', 'K+', 'Ca+', 'Fe+', 'Ti+', 'V+',
@@ -335,8 +336,13 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
             line_nu = (c.c / (2 * np.pi) * (k_upper - k_lower)).to(u.Hz)
 
             # Filter by frequency range
-            mask = (line_nu.value >= nu0) & (line_nu.value <= max_nu)
+            mask = (line_nu >= nu0*u.Hz) & (line_nu <= max_nu*u.Hz)
+            
+            # Apply mask
             trans = trans[mask]
+            line_nu = line_nu[mask]
+            k_upper = k_upper[mask]
+            k_lower = k_lower[mask]
 
             # loop over each trasition in this file
             for row in trans.itertuples(index=False):
@@ -344,7 +350,7 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
                 # get index of upper and lower states and einstein A from trans file
                 upper_state_idx = row.upper
                 lower_state_idx = row.lower
-                ein_a = row.A
+                ein_a = row.A*u.s**-1
 
                 # Find wavenumber of upper and lower states
                 k_upper = states[states[0] == upper_state_idx][1].iloc[0]*u.cm**-1
@@ -359,11 +365,11 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
                 g_upper = states[states[0] == upper_state_idx][2].iloc[0]
 
                 # compute doppler width 
-                doppler_dnu = doppler_dlnu * line_nu
+                doppler_dnu = doppler_dlnu * line_nu.to(u.Hz).value
 
-                # compute line opacity 
-                this_kappa = n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/(c.k_B *T))  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
-        
+                # compute line opacity in cgs units
+                this_kappa = (n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/(c.k_B *T))).cgs  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
+
                 # make kappa distribution, line shape depending on the chosen line profile
                 if line_profile == 'Voigt':
                             # Need to deal with pressure broadening??? 
@@ -386,18 +392,23 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
                     start_idx = np.maximum(line_idx - idx_range, 0)
                     end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
 
+                    line_nu_val = float(line_nu.to(u.Hz).value)
+                    doppler_dnu_val = float(doppler_dnu.to(u.Hz).value)
+
                     # make voight profile
-                    kappa[start_idx:end_idx] += this_kappa * voigt_profile(nu[start_idx:end_idx] - line_nu, doppler_dnu/np.sqrt(2), Gamma/4/np.pi)
+                    kappa[start_idx:end_idx] += this_kappa.value * voigt_profile(nu[start_idx:end_idx] - line_nu_val, doppler_dnu_val/np.sqrt(2), Gamma/4/np.pi)
                 elif line_profile == 'Gaussian':
                     
                     # Find start and end indices within 3 sigma
                     idx_range = int(3*doppler_dlnu/dlnu)
-                    line_idx = int((np.log(line_nu) - np.log(nu0))/dlnu)
+                    line_idx = int((np.log(line_nu.value) - np.log(nu0))/dlnu)
                     start_idx = np.maximum(line_idx - idx_range, 0)
                     end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
+                    
+                    line_nu_val = line_nu.to(u.Hz).value
 
                     # scale gaussian line profile by kappa. 
-                    kappa[start_idx:end_idx] += this_kappa * np.exp(-((nu[start_idx:end_idx] - line_nu)/doppler_dnu)**2)/(doppler_dnu * np.sqrt(np.pi))
+                    kappa[start_idx:end_idx] += this_kappa.value * np.exp(-((nu[start_idx:end_idx] - line_nu_val)/doppler_dnu)**2) / (doppler_dnu * np.sqrt(np.pi))
                 else:
                     raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
     
