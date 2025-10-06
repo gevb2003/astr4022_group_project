@@ -25,9 +25,10 @@ from opacity_reader import *
 from astropy.io import fits
 import eos as eos
 import time
+from labellines import labelLines
 
 # === USER INPUT ===
-Teff = 3700 # in units of kelvin. Minimum 3300 K
+Teff = 3300 # in units of kelvin. Minimum 3300 K
 logg = 1.0
 g = 10**logg * u.cm/u.s**2
 P0 = 10 # Initial pressure in dyn/cm^2
@@ -87,6 +88,7 @@ def mu_from_P_T_pairwise(P, T):
         raise ValueError("P and T must have the same shape for pairwise evaluation")
 
     mu = np.empty(P.shape, dtype=float)
+    num = []
 
     for i, (p_val, t_val) in enumerate(zip(P, T)):
         # Ensure scalar Quantities
@@ -96,10 +98,11 @@ def mu_from_P_T_pairwise(P, T):
             t_val = t_val * u.K
 
         # eos function expects arrays of T, but we only want one scalar here
-        _, _, _, mus = eos.P_T_equilibrium_tables(p_val, np.atleast_1d(t_val), plot=False, verbose=False)
+        _, _, nums, mus = eos.P_T_equilibrium_tables(p_val, np.atleast_1d(t_val), plot=False, verbose=False)
         mu[i] = float(mus[0])  # take scalar value
+        num.append(nums)
 
-    return mu
+    return num, mu
 
 def get_R(P, T):
     """
@@ -165,13 +168,19 @@ sol = solve_ivp(dPdtau, [0, 20], [P0], args=(Teff,), t_eval=tau_grid, method='RK
 Ps = sol.y[0]
 Ts = T_tau(tau_grid, Teff)
 # Artificially cut the deep layer temperature due to convection.
+# Get new tau for later
+cutoff_val = convective_cutoff * Teff
+idx_cut = np.argmax(Ts >= cutoff_val)
+tau_cut = tau_grid[idx_cut]
+tau_grid = np.minimum(tau_grid, tau_cut)
 Ts = np.minimum(Ts,convective_cutoff*Teff)
+
 
 # Calculate rho values from new Ps and Ts
 end = time.time()
 print(f"Equilibrium Elapsed time: {end - start:.3f} seconds")
 print('Calculating rhos')
-mu = mu_from_P_T_pairwise(Ps, Ts)
+nums,mu = mu_from_P_T_pairwise(Ps, Ts)
 rhos = (Ps*u.dyne/u.cm**2 /(c.k_B*Ts*u.K)*u.u*mu).to(u.g/u.cm**3).value
 
 # Interpolate onto the tau grid
@@ -217,14 +226,45 @@ H = compute_H(wave, Ts, tau_grid, kappa_nu_bars, kappa_bars)
 
 # Plot the flux and the blackbody approximation
 # So far it isn't great... why?
+#plt.figure(1)
 plt.figure(1)
 plt.clf()
-plt.plot(wave, 4*np.pi*H /1e6, label='Flux')
-plt.plot(wave, np.pi*Blambda_SI(wave.to(u.um).value, Teff) / 1e6, label='Blackbody')
-plt.xlabel('Wavelength (nm)')
-plt.ylabel(r'Flux (W/m$^2$/$\mu$m)')
-plt.legend()
+tsuji_K, tsuji_masses = eos.molecules()
+nmol = len(tsuji_K['mol'])
+elt_names = tsuji_K['mol'].data
+fig, axes = plt.subplots(
+    1, 3,
+    sharey='row',      # share y-axis across all plots if scales allow
+    figsize=(12, 4),
+    gridspec_kw={'hspace': 0, 'wspace': 0}  # no vertical gap, small horizontal gap
+)
+ax1, ax2, ax3 = axes[0], axes[1], axes[2]
+for i, element in enumerate(elt_names):
+    n_element = []
+    for num in nums:
+        n_element.append(num[0,-1*(nmol+1)+i])
+    ax1.plot(tau_grid, n_element, label=element)
+    ax2.plot(Ts, n_element, label=element)
+    ax3.plot(Ps, n_element, label=element)
+ax1.set_xlabel(r'$\tau$')
+ax1.set_xscale('log')
+ax1.set_yscale('log')
+ax1.set_ylabel(r'$n_\text{mol}$ [1/cm$^3$]')
+ax2.set_xscale('linear')
+ax2.set_yscale('log')
+ax2.set_xlabel(r'$T$ [K]')
+ax3.set_xscale('log')
+ax3.set_yscale('log')
+ax3.set_xlabel(r'$P$ [dyne/cm$^2$]')
+labelLines(ax1.get_lines(), zorder=2.5)
+#plt.legend()
+plt.title('Molecular Number Densities')
+plt.savefig(f'figures/number_density_{Teff}.pdf', dpi=200)
 plt.show()
+
+"""if plot:
+plt.title('Equilibrium Solve Test')
+plt.savefig('figures/equilibrium_solve_test.pdf', dpi=300)"""
 
 # Now lets add in all lines. The Strontium line calculation is saved under "week34" if you
 # want to look at that.
@@ -256,7 +296,7 @@ g_macro = np.exp(-(np.arange(-int(2.5*width), int(2.5*width)+1)**2)/width**2)
 H_all = np.convolve(H_all, g_macro/np.sum(g_macro), mode='same')
 
 #Plot this
-plt.figure(2, figsize=(10,6))
+plt.figure(4, figsize=(10,6))
 plt.clf()
 plt.plot(wave_nm, 4*np.pi*H_all / 1e6, label='Flux (No Molecular Lines)')
 plt.title(f'M-giant Spectra Test: {Teff} K, logg={logg}, v_macro={macroturb} km/s')
