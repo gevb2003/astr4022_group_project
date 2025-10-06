@@ -258,7 +258,7 @@ ax3.set_yscale('log')
 ax3.set_xlabel(r'$P$ [dyne/cm$^2$]')
 labelLines(ax1.get_lines(), zorder=2.5)
 #plt.legend()
-plt.title('Molecular Number Densities')
+plt.suptitle('Molecular Number Densities')
 plt.savefig(f'figures/number_density_{Teff}.pdf', dpi=200)
 plt.show()
 
