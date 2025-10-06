@@ -6,6 +6,8 @@ from io import StringIO
 from io import BytesIO
 import bz2
 import numpy as np
+import pyarrow.csv as pv
+import pyarrow.parquet as pq
 
 
 # List of wavenumber ranges for molecles with more than one transfile
@@ -96,13 +98,9 @@ def get_exomol_states(molecule, dest='./'):
     return file_path
 
 def read_exomol_states(states_file):
-    # If file is bz2, decompress to memory
-    if states_file.endswith('.bz2'):
-        with bz2.BZ2File(states_file) as f:
-            text = f.read().decode()
-        df = pd.read_csv(StringIO(text), sep=r'\s+', comment="#", header=None)
-    else:
-        df = pd.read_csv(states_file, sep=r'\s+', comment="#", header=None)
+    opener = bz2.open if states_file.endswith(".bz2") else open
+    with opener(states_file, "rt") as f:  # 't' for text mode
+        df = pd.read_csv(f, delim_whitespace=True, comment="#", header=None, engine="c")
     return df
 
 
@@ -182,12 +180,19 @@ def get_exomol_trans(molecule, E_min, E_max, dest='./'):
     return downloaded_files
 
 def read_exomol_trans(trans_file):
-    if trans_file.endswith('.bz2'):
-        with bz2.BZ2File(trans_file) as f:
-            text = f.read().decode()
-        df = pd.read_csv(StringIO(text), sep=r'\s+', comment="#", header=None, names=['upper', 'lower', 'A'])
-    else:
-        df = pd.read_csv(trans_file, sep=r'\s+', comment="#", header=None, names=['upper', 'lower', 'A'])
+    print("Reading trans file")
+
+    opener = bz2.open if trans_file.endswith(".bz2") else open
+    with opener(trans_file, "rt") as f:
+        # Split on *any amount* of whitespace
+        df = pd.read_csv(
+            f,
+            sep=r"\s+",
+            names=["upper", "lower", "A"],
+            engine="c",
+        )
+
+    print("Finished reading trans file")
     return df
 
 def read_exomol_pf(molecule, dest='./'):

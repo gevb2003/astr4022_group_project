@@ -327,90 +327,111 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
             # extract trans file 
             trans = read_exomol_trans(file_path)
 
-            # Convert states DataFrame into Series for fast lookup
-            state_energy = states.set_index(0)[1]
+            # energy and degenracy of states
+            state_energy = states[1].to_numpy()
+            state_degeneracy = states[2].to_numpy()
+
+            # find the energies of transition
+            upper_idx = trans['upper'].to_numpy()
+            lower_idx = trans['lower'].to_numpy()
+
+            k_upper = state_energy[upper_idx] * u.cm**-1
+            k_lower = state_energy[lower_idx] * u.cm**-1
+            g_upper = state_degeneracy[upper_idx]
 
             # Compute line frequencies
-            k_upper = state_energy.loc[trans['upper']].to_numpy() * u.cm**-1
-            k_lower = state_energy.loc[trans['lower']].to_numpy() * u.cm**-1
             line_nu = (c.c / (2 * np.pi) * (k_upper - k_lower)).to(u.Hz)
 
+            # get the einstein coefficien
+            ein_a = trans['A'].to_numpy() * u.s**-1
+
             # Filter by frequency range
-            mask = (line_nu >= nu0*u.Hz) & (line_nu <= max_nu*u.Hz)
+            mask = (line_nu.value >= nu0) & (line_nu.value <= max_nu) & (ein_a.value > 1e-8)
             
             # Apply mask
             trans = trans[mask]
             line_nu = line_nu[mask]
             k_upper = k_upper[mask]
             k_lower = k_lower[mask]
+            ein_a = ein_a[mask]
+            g_upper = g_upper[mask]
 
-            # loop over each trasition in this file
-            for row in trans.itertuples(index=False):
-            
-                # get index of upper and lower states and einstein A from trans file
-                upper_state_idx = row.upper
-                lower_state_idx = row.lower
-                ein_a = row.A*u.s**-1
+            print(f'calculating {len(line_nu)} transitons')
 
-                # Find wavenumber of upper and lower states
-                k_upper = states[states[0] == upper_state_idx][1].iloc[0]*u.cm**-1
-                k_lower = states[states[0] == lower_state_idx][1].iloc[0]*u.cm**-1
-                # calculate frequency of the line in Hz
-                line_nu = (c.c/(2*np.pi) * (k_upper - k_lower)).to(u.Hz)
+            # convert wavenumber to energy of the lower state 
+            E_lower = c.h*c.c/(2*np.pi) * k_lower
 
-                # convert wavenumber to energy of the lower state 
-                E_lower = c.h*c.c/(2*np.pi) * k_lower
+            # compute doppler width 
+            doppler_dnu = doppler_dlnu * line_nu.to(u.Hz).value
 
-                # get degeneracy of the upper level
-                g_upper = states[states[0] == upper_state_idx][2].iloc[0]
+            # compute line opacity in cgs units
+            this_kappa = (n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/(c.k_B *T))).cgs
 
-                # compute doppler width 
-                doppler_dnu = doppler_dlnu * line_nu.to(u.Hz).value
+            # make kappa distribution, line shape depending on the chosen line profile
+            if line_profile == 'Voigt':
+                # calculate Gamma for line broadening 
+                # use the life time of the upper state if avaliable
+                if lifetime_toggle == 1:
+                    # extract the lifetime of the upper state 
+                    lifetime = states[5]*u.s
 
-                # compute line opacity in cgs units
-                this_kappa = (n * g_upper/Zpart * c.c**2/(8*np.pi*line_nu**2) * ein_a * np.exp(-E_lower/(c.k_B *T))).cgs  # * (1-np.exp(-h_kB_cgs*line_nu/T)) # correct for stimulated emission
-
-                # make kappa distribution, line shape depending on the chosen line profile
-                if line_profile == 'Voigt':
-                            # Need to deal with pressure broadening??? 
-                    # calculate Gamma for line broadening 
-                    # use the life time of the upper state if avaliable
-                    if lifetime_toggle == 1:
-                        # extract the lifetime of the upper state 
-                        lifetime = states[5]*u.s
-
-                        # Gamma is the inverse of the lifetime
-                        Gamma = 1/lifetime
-                    else:
-                        print("No lifetime data available, using only Doppler broadening")
-                        Gamma = 0*u.s**-1
-
-
-                    idx_range = int(0.03/dlnu)
-                    # find start and end indices within +/- 3 doppler widths
-                    line_idx = int((np.log(line_nu.value) - np.log(nu0))/dlnu)
-                    start_idx = np.maximum(line_idx - idx_range, 0)
-                    end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
-
-                    line_nu_val = float(line_nu.to(u.Hz).value)
-                    doppler_dnu_val = float(doppler_dnu.to(u.Hz).value)
-
-                    # make voight profile
-                    kappa[start_idx:end_idx] += this_kappa.value * voigt_profile(nu[start_idx:end_idx] - line_nu_val, doppler_dnu_val/np.sqrt(2), Gamma/4/np.pi)
-                elif line_profile == 'Gaussian':
-                    
-                    # Find start and end indices within 3 sigma
-                    idx_range = int(3*doppler_dlnu/dlnu)
-                    line_idx = int((np.log(line_nu.value) - np.log(nu0))/dlnu)
-                    start_idx = np.maximum(line_idx - idx_range, 0)
-                    end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
-                    
-                    line_nu_val = line_nu.to(u.Hz).value
-
-                    # scale gaussian line profile by kappa. 
-                    kappa[start_idx:end_idx] += this_kappa.value * np.exp(-((nu[start_idx:end_idx] - line_nu_val)/doppler_dnu)**2) / (doppler_dnu * np.sqrt(np.pi))
+                    # Gamma is the inverse of the lifetime
+                    Gamma = 1/lifetime
                 else:
-                    raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
+                    print("No lifetime data available, using only Doppler broadening")
+                    Gamma = 0*u.s**-1
+
+
+                idx_range = int(0.03/dlnu)
+                # find start and end indices within +/- 3 doppler widths
+                line_idx = int((np.log(line_nu.value) - np.log(nu0))/dlnu)
+                start_idx = np.maximum(line_idx - idx_range, 0)
+                end_idx = np.minimum(line_idx + idx_range + 1, N_nu-1)
+
+                line_nu_val = float(line_nu.to(u.Hz).value)
+                doppler_dnu_val = float(doppler_dnu.to(u.Hz).value)
+
+                # make voight profile
+                kappa[start_idx:end_idx] += this_kappa.value * voigt_profile(nu[start_idx:end_idx] - line_nu_val, doppler_dnu_val/np.sqrt(2), Gamma/4/np.pi)
+            elif line_profile == 'Gaussian':
+                
+                # Precompute log of frequency for mapping to indices
+                log_nu = np.log(nu)
+                dlog = np.log(1 + dlnu)
+
+                # Find approximate central index for each line
+                line_idx = ((np.log(line_nu.value / nu0)) / dlog).astype(int)
+
+                # Doppler widths
+                width = doppler_dnu
+                amp = this_kappa.value / (width * np.sqrt(np.pi))
+
+                # Range of ±3 widths
+                for offset in range(-3, 4):
+                    idx = line_idx + offset
+                    valid = (idx >= 0) & (idx < N_nu)
+                    x = (nu[idx[valid]] - line_nu.value[valid]) / width[valid]
+                    np.add.at(kappa, idx[valid], amp[valid] * np.exp(-x**2))
+                
+                # loop over lines
+                #for i in range(len(line_nu)):
+                    #line_nu_val = line_nu[i].to(u.Hz).value
+                    #doppler_dnu_val = doppler_dnu[i]
+                    #kappa_i = this_kappa[i].value
+
+                    # Limit to ±3 Doppler widths
+                    #nu_min = line_nu_val - 3 * doppler_dnu_val
+                    #nu_max = line_nu_val + 3 * doppler_dnu_val
+                    #mask = (nu >= nu_min) & (nu <= nu_max)
+
+                    # Add contribution to total opacity
+                    #kappa[mask] += (
+                        #kappa_i
+                        #* np.exp(-((nu[mask] - line_nu_val) / doppler_dnu_val) ** 2)
+                        #/ (doppler_dnu_val * np.sqrt(np.pi))
+                    #)
+            else:
+                raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
     
     return kappa
 
