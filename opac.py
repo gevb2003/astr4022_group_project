@@ -272,7 +272,7 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
     # list names of molecules that have exomol data for 
     #molecules = ['TiO', 'VO', 'CN', 'CO', 'H2O']
     # Testing just with TiO
-    molecules = ['TiO']
+    molecules = ['CO']
 
     # loop through each molecule
     for name in molecules:
@@ -326,14 +326,17 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
         for file_path in trans_file_paths:
             # extract trans file 
             trans = read_exomol_trans(file_path)
+            
+            print(f'the state file has {len(states)} state in it.')
 
             # energy and degenracy of states
             state_energy = states[1].to_numpy()
             state_degeneracy = states[2].to_numpy()
+            state_idx = states[0].to_numpy
 
             # find the energies of transition
-            upper_idx = trans['upper'].to_numpy()
-            lower_idx = trans['lower'].to_numpy()
+            upper_idx = trans['upper'].to_numpy(dtype=int) - 1
+            lower_idx = trans['lower'].to_numpy(dtype=int) - 1
 
             k_upper = state_energy[upper_idx] * u.cm**-1
             k_lower = state_energy[lower_idx] * u.cm**-1
@@ -413,23 +416,6 @@ def molecular_line_kappa(nu0, dlnu, N_nu, P, T, microturb=5.0, line_profile='Gau
                     x = (nu[idx[valid]] - line_nu.value[valid]) / width[valid]
                     np.add.at(kappa, idx[valid], amp[valid] * np.exp(-x**2))
                 
-                # loop over lines
-                #for i in range(len(line_nu)):
-                    #line_nu_val = line_nu[i].to(u.Hz).value
-                    #doppler_dnu_val = doppler_dnu[i]
-                    #kappa_i = this_kappa[i].value
-
-                    # Limit to ±3 Doppler widths
-                    #nu_min = line_nu_val - 3 * doppler_dnu_val
-                    #nu_max = line_nu_val + 3 * doppler_dnu_val
-                    #mask = (nu >= nu_min) & (nu <= nu_max)
-
-                    # Add contribution to total opacity
-                    #kappa[mask] += (
-                        #kappa_i
-                        #* np.exp(-((nu[mask] - line_nu_val) / doppler_dnu_val) ** 2)
-                        #/ (doppler_dnu_val * np.sqrt(np.pi))
-                    #)
             else:
                 raise ValueError("line_profile must be either 'Voigt' or 'Gaussian'")
     
