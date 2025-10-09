@@ -224,6 +224,7 @@ plt.plot(wave, Flambda, label='Short Char. Explicit')
 plt.plot(wave, Flambda_trapz, label='Trapezoidal')
 plt.xlabel('Wavelength (nm)')
 plt.ylabel(r'F$_\lambda$ (W/m$^2$/nm)')
+plt.legend()
 plt.tight_layout()
 plt.savefig('figures/grey_structure_fig5.pdf', dpi=300)
 
